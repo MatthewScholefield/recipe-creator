@@ -7,14 +7,13 @@ import subprocess
 from uuid import uuid4
 
 backend = Path(__file__).resolve().parents[2] / "recipe-creator-backend"
-origin = f"http://127.0.0.1:{int(os.environ.get('RECIPE_E2E_PORT', '5173'))}"
+origin = f"http://127.0.0.1:{int(os.environ.get('RECIPE_E2E_PORT', '2772'))}"
 run_id = uuid4().hex
 
 # Fail before migrating if another application owns the API port.
 with socket.socket() as probe:
     probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    probe.bind(("127.0.0.1", 8080))
-
+    probe.bind(("127.0.0.1", 2332))
 env = {
     **os.environ,
     "RECIPE_DB_URL": "http://127.0.0.1:18081",
@@ -29,6 +28,7 @@ env = {
     "RECIPE_SESSION_SECRET": uuid4().hex + uuid4().hex,
     "RECIPE_AI_API_KEY": "",
     "RECIPE_E2E_ADMIN_PASSWORD": os.environ.get("RECIPE_E2E_ADMIN_PASSWORD", "recipe-e2e-test-only"),
+    "WEB_CONCURRENCY": "1",
 }
 env["RECIPE_ADMIN_PASSWORD_HASH"] = subprocess.check_output(
     ["uv", "run", "python", "-c",
@@ -40,4 +40,4 @@ subprocess.run(["uv", "run", "python", "-m", "recipe_creator.cli", "migrate"],
 print(f"E2E database: recipe_e2e/{env['RECIPE_DB_DATABASE']}; media: {env['RECIPE_MEDIA_ROOT']}", flush=True)
 os.chdir(backend)
 os.execvpe("uv", ["uv", "run", "uvicorn", "recipe_creator.app:app", "--host", "127.0.0.1",
-                   "--port", "8080", "--no-proxy-headers"], env)
+                   "--port", "2332", "--workers", "1", "--no-proxy-headers"], env)

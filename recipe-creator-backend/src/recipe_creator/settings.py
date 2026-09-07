@@ -22,8 +22,8 @@ class Settings(BaseSettings):
     db_path: Path = Path.home() / ".local/share/recipe-creator/db"
     media_root: Path = Path.home() / ".local/share/recipe-creator/media"
     frontend_dist: Path = Path(__file__).resolve().parents[3] / "recipe-creator-frontend/dist"
-    public_origin: str = "http://localhost:5173"
-    allowed_origins: list[str] = ["http://localhost:5173"]
+    public_origin: str = "http://localhost:2772"
+    allowed_origins: list[str] = ["http://localhost:2772"]
     secure_cookies: bool = True
     admin_password_hash: SecretStr = SecretStr("")
     session_secret: SecretStr = SecretStr("")

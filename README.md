@@ -4,21 +4,27 @@ A small recipe notebook for family and friends. Browse without an account, publi
 
 ## Run locally
 
-Requires Python 3.12+, uv, Node.js 22+, npm, and a running SurrealDB 3.2.4 server.
+Requires Python 3.12+, uv, Node.js 22+, npm, and the SurrealDB 3.2.4 CLI.
 
 ```sh
 make install
 cp .env.example .env
 ```
 
-Edit `.env` with local database connection details, then:
+In one terminal, start the local embedded SurrealKV database:
+
+```sh
+make db
+```
+
+In a second terminal, apply migrations and start the application:
 
 ```sh
 make migrate
 make dev
 ```
 
-Open `http://localhost:5173`. The API runs on port 8080. For local HTTP development, turn off secure cookies in `.env`; leave them enabled elsewhere.
+Open `http://localhost:2772`. The API runs on port 2332 with one Uvicorn worker. For local HTTP development, turn off secure cookies in `.env`; leave them enabled elsewhere.
 
 AI is optional: add the provider key to `.env` to enable parsing and ingredient estimates. Recipes can still be shared as text without it. For administration, use `make hash-password` and add the resulting hash to `.env`.
 

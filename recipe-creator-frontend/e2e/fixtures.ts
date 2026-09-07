@@ -1,11 +1,11 @@
 import { test as base, expect, type APIRequestContext, type APIResponse, type BrowserContext, type Page } from '@playwright/test';
 import type { Session, Recipe } from '../src/types';
 
-export const origin = `http://127.0.0.1:${Number(process.env.RECIPE_E2E_PORT || 5173)}`;
+export const origin = `http://127.0.0.1:${Number(process.env.RECIPE_E2E_PORT || 2772)}`;
 export const source = '  A family recipe.\n\n½ cup stock\n\nHeat to 180°C.\n  Wait 20 minutes.\n\nNotes: never rewrite this.  \n';
 export async function session(api: APIRequestContext): Promise<Session> {
   const result = await api.get('/api/session');
-  expect(result.ok(), 'Start the actual API on port 8080 with an isolated database and the Vite origin allowed').toBeTruthy();
+  expect(result.ok(), 'Start the actual API on port 2332 with an isolated database and the Vite origin allowed').toBeTruthy();
   return result.json();
 }
 export async function mutate(api: APIRequestContext, path: string, data?: unknown, method = 'POST'): Promise<APIResponse> {

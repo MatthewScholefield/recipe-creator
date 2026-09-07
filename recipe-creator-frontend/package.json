@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite --host 127.0.0.1 --port 2772 --strictPort",
     "build": "vite build",
-    "preview": "vite preview",
+    "preview": "vite preview --host 127.0.0.1 --port 2772 --strictPort",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "test:e2e": "playwright test",

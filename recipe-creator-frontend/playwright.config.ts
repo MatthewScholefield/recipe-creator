@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test';
 
-const port = Number(process.env.RECIPE_E2E_PORT || 5173);
+const port = Number(process.env.RECIPE_E2E_PORT || 2772);
 const origin = `http://127.0.0.1:${port}`;
 process.env.RECIPE_E2E_ADMIN_PASSWORD ||= 'recipe-e2e-test-only';
 
@@ -12,8 +12,7 @@ export default defineConfig({
   use: { baseURL: origin, trace: 'retain-on-failure' },
   webServer: [
     {
-      command: 'python3 e2e/start-backend.py',
-      url: 'http://127.0.0.1:8080/api/session',
+      url: 'http://127.0.0.1:2332/api/session',
       reuseExistingServer: false,
       gracefulShutdown: { signal: 'SIGTERM', timeout: 10_000 },
       timeout: 120_000,
