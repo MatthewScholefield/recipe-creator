@@ -8,20 +8,18 @@ Requires Python 3.12+, uv, Node.js 22+, npm, and a running SurrealDB 3.2.4 serve
 
 ```sh
 make install
-export RECIPE_DB_URL=http://127.0.0.1:8000
-export RECIPE_DB_USER=root
-export RECIPE_SECURE_COOKIES=false
+cp .env.example .env
 ```
 
-Set `RECIPE_DB_PASSWORD` privately to your database password, then:
+Edit `.env` with local database connection details, then:
 
 ```sh
 make migrate
 make dev
 ```
 
-Open `http://localhost:5173`. The API runs on port 8080. Disabling secure cookies is for local HTTP development only.
+Open `http://localhost:5173`. The API runs on port 8080. For local HTTP development, turn off secure cookies in `.env`; leave them enabled elsewhere.
 
-AI is optional: configure `RECIPE_AI_API_KEY` to enable parsing and ingredient estimates. Recipes can still be shared as text without it. For administration, use `make hash-password` and set `RECIPE_ADMIN_PASSWORD_HASH` privately.
+AI is optional: add the provider key to `.env` to enable parsing and ingredient estimates. Recipes can still be shared as text without it. For administration, use `make hash-password` and add the resulting hash to `.env`.
 
-`make help` lists build, import, backup, and restore commands. Production uses static frontend assets, FastAPI, and SurrealDB; configure HTTPS, secure cookies, allowed origins, and persistent storage before deployment. Never commit passwords or API keys.
+`make help` lists build, import, backup, and restore commands. Production uses static frontend assets, FastAPI, and SurrealDB; configure HTTPS, secure cookies, allowed origins, and persistent storage in `.env` before deployment. Keep `.env` private and never commit it.

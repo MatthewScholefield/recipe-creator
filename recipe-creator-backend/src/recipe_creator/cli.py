@@ -1,4 +1,4 @@
-"""Explicit operator commands. Configuration is read from RECIPE_* / private .env."""
+"""Explicit operator commands. Configuration is read from the private .env file."""
 import argparse
 import asyncio
 from datetime import UTC, datetime
@@ -277,7 +277,7 @@ async def _database_command(args, settings):
 
 def parser():
     result = argparse.ArgumentParser(
-        description="Recipe Creator maintenance (RECIPE_* environment/private .env; no deployment automation).",
+        description="Recipe Creator maintenance (.env file; no deployment automation).",
         epilog="Examples: python -m recipe_creator.cli import snapshot.json --dry-run; "
                "python -m recipe_creator.cli backup backup.tar.gz --confirm-quiesced. "
                "DB must remain running during backup/restore; stop API, workers and other writers. "
@@ -297,7 +297,7 @@ def parser():
         if name == "restore":
             command.add_argument("--confirm-trusted-archive", action="store_true", required=True,
                                  help="I trust this SQL archive; checksums are not authentication. "
-                                      "Set RECIPE_DB_DATABASE to a NEW name and RECIPE_MEDIA_ROOT to an absent path")
+                                      "Set a NEW database name and absent media path in .env")
     commands.add_parser("cleanup", help="Reconcile photo retention, interrupted uploads and orphan media")
     commands.add_parser("hash-password", help="Prompt twice for an admin password and print its Argon2id hash")
     commands.add_parser("export-openapi", help="Print OpenAPI JSON without connecting to DB or starting workers")

@@ -1,4 +1,4 @@
-"""Environment settings. All variables use the RECIPE_ prefix."""
+"""Application settings with optional values from the .env file."""
 from pathlib import Path
 from functools import lru_cache
 
@@ -7,7 +7,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="RECIPE_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="RECIPE_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     db_url: str = "http://127.0.0.1:8000"
     db_namespace: str = Field(default="recipe_creator", pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")

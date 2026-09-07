@@ -7,7 +7,7 @@ ARGS ?=
 
 .PHONY: help install dev dev-api dev-web build check test test-backend test-frontend migrate import backup restore cleanup hash-password export-openapi
 help:
-	@printf '%s\n' 'make install | dev | build | check | test' 'make migrate | cleanup | hash-password | export-openapi' 'make import ARGS="snapshot.json --dry-run"' 'make backup ARGS="backup.tar.gz --confirm-quiesced"' 'make restore ARGS="backup.tar.gz --confirm-quiesced --confirm-trusted-archive"' 'Set private RECIPE_* environment configuration; never put passwords in command arguments.' 'Backup/restore: stop API, workers and all other writers; leave DB running.' 'Restore: use a NEW RECIPE_DB_DATABASE and absent RECIPE_MEDIA_ROOT. See CLI --help.'
+	@printf '%s\n' 'make install | dev | build | check | test' 'make migrate | cleanup | hash-password | export-openapi' 'make import ARGS="snapshot.json --dry-run"' 'make backup ARGS="backup.tar.gz --confirm-quiesced"' 'make restore ARGS="backup.tar.gz --confirm-quiesced --confirm-trusted-archive"' 'Configure private settings in .env; never put passwords in command arguments.' 'Backup/restore: stop API, workers and all other writers; leave DB running.' 'Restore: use a NEW database name and absent media path from .env. See CLI --help.'
 install:
 	$(UV) sync --project $(BACKEND) --locked
 	$(NPM) --prefix $(FRONTEND) ci
