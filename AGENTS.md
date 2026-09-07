@@ -2,16 +2,16 @@
 
 - `recipe-creator-frontend/`: Svelte 5 + TypeScript + Vite; `src/` UI, `e2e/` Playwright.
 - `recipe-creator-backend/`: FastAPI; `src/recipe_creator/` routes/services/models, `migrations/`, `tests/`.
-- Root `Makefile`: development, checks, builds, and maintenance. Configuration uses `RECIPE_*` environment variables.
+- Root `justfile`: development, checks, builds, and maintenance. Configuration uses `RECIPE_*` environment variables.
 
 ## Minimal validation
 
-Run `make check` for a quick syntax/type check. Run tests for the changed area:
+Run `just check` for a quick syntax/type check. Run tests for the changed area:
 
 - Backend: `uv run --project recipe-creator-backend pytest recipe-creator-backend/tests/test_<area>.py -q`
-- Frontend: `make test-frontend`
+- Frontend: `just test-frontend`
 
-Database tests require a disposable real SurrealDB and `RECIPE_TEST_DB_URL` / `RECIPE_TEST_DB_PASSWORD`; skipped tests do not validate persistence. Run `make test` for broader coverage.
+Database tests require a disposable real SurrealDB and `RECIPE_TEST_DB_URL` / `RECIPE_TEST_DB_PASSWORD`; skipped tests do not validate persistence. Run `just test` for broader coverage.
 
 ## Guardrails
 
