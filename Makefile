@@ -16,7 +16,7 @@ $(CLI_ARGS):
 
 .PHONY: help install db dev dev-api dev-web build check test test-backend test-frontend migrate import backup restore cleanup hash-password export-openapi
 help:
-	@printf '%s\n' 'make install | db | dev | build | check | test' 'make migrate | cleanup | hash-password | export-openapi' 'make -- import snapshot.json --dry-run' 'make -- backup backup.tar.gz --confirm-quiesced' 'make -- restore backup.tar.gz --confirm-quiesced --confirm-trusted-archive' 'Configure private settings in .env; never put passwords in command arguments.' 'Database: make db starts a local SurrealKV datastore on 127.0.0.1:8000.' 'Backup/restore: stop API, workers and all other writers; leave DB running.' 'Restore: use a NEW database name and absent media path from .env. See CLI --help.'
+	@printf '%s\n' 'make install | db | dev | build | check | test' 'make migrate | cleanup | hash-password | export-openapi' 'make -- import snapshot.json --dry-run' 'make -- backup backup.tar.gz --confirm-quiesced' 'make -- restore backup.tar.gz --confirm-quiesced --confirm-trusted-archive' 'Configure private settings in .env; never put passwords in command arguments.' 'Admin: run make hash-password, then set RECIPE_ADMIN_PASSWORD_HASH in .env.' 'Database: make db starts a local SurrealKV datastore on 127.0.0.1:8000.' 'Backup/restore: stop API, workers and all other writers; leave DB running.' 'Restore: use a NEW database name and absent media path from .env. See CLI --help.'
 install:
 	$(UV) sync --project $(BACKEND) --locked
 	$(NPM) --prefix $(FRONTEND) ci
