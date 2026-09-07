@@ -1,0 +1,191 @@
+from typing import Annotated, Literal
+from urllib.parse import urlsplit
+from uuid import uuid4
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .ingredients import parse_quantity
+
+
+ShortText = Annotated[str, Field(max_length=500)]
+Prose = Annotated[str, Field(max_length=100_000)]
+Identifier = Annotated[str, Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")]
+Amount = Annotated[str, Field(max_length=64)]
+
+
+class StrictDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
+
+class Ingredient(StrictDTO):
+    id: Identifier = Field(default_factory=lambda: uuid4().hex)
+    original_text: Annotated[str, Field(max_length=10_000)] = ""
+    quantity: Amount | None = None
+    quantity_max: Amount | None = None
+    unit: ShortText = ""
+    name: ShortText = ""
+    preparation: Annotated[str, Field(max_length=2000)] = ""
+    optional: bool = False
+    grams: None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_estimates(cls, value):
+        if isinstance(value, dict):
+            value = {key: item for key, item in value.items() if not key.startswith("grams")}
+        return value
+
+    @field_validator("quantity", "quantity_max")
+    @classmethod
+    def valid_amount(cls, value):
+        if value is not None:
+            parsed = parse_quantity(value)
+            if parsed is None or parsed[0] != parsed[1] or parsed[1] > 1_000_000_000:
+                raise ValueError("Use a finite decimal or fraction")
+        return value
+
+    @model_validator(mode="after")
+    def ordered_range(self):
+        if self.quantity_max is not None:
+            if self.quantity is None or parse_quantity(self.quantity_max)[0] < parse_quantity(self.quantity)[0]:
+                raise ValueError("Quantity maximum must not be below quantity")
+        return self
+
+
+class IngredientGroup(StrictDTO):
+    id: Identifier = Field(default_factory=lambda: uuid4().hex)
+    name: ShortText = ""
+    ingredients: list[Ingredient] = Field(default_factory=list, max_length=300)
+
+
+class RecipeDraft(StrictDTO):
+    title: Annotated[str, Field(min_length=1, max_length=300)]
+    source_text: Prose = ""
+    mode: Literal["text", "structured"] = "text"
+    description: Prose = ""
+    ingredient_groups: list[IngredientGroup] = Field(default_factory=list, max_length=50)
+    directions: Prose = ""
+    notes: Prose = ""
+    unclassified: Prose = ""
+    tags: list[Annotated[str, Field(min_length=1, max_length=80)]] = Field(default_factory=list, max_length=50)
+    yield_amount: Amount | None = None
+    yield_unit: ShortText = ""
+    source_url: Annotated[str, Field(max_length=2048)] = ""
+    modifications: Prose = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_authority(cls, value):
+        if isinstance(value, dict):
+            readonly = {"owner_id", "author_name", "can_edit", "photo_trust", "photo_trusted", "admin", "trusted"}
+            return {key: item for key, item in value.items() if key not in readonly}
+        return value
+
+    @field_validator("title")
+    @classmethod
+    def nonblank_title(cls, value):
+        if not value.strip():
+            raise ValueError("Title is required")
+        return value
+
+    @field_validator("yield_amount")
+    @classmethod
+    def positive_yield(cls, value):
+        value = Ingredient.valid_amount(value)
+        if value is not None and parse_quantity(value)[0] <= 0:
+            raise ValueError("Yield must be positive")
+        return value
+
+    @field_validator("source_url")
+    @classmethod
+    def safe_url(cls, value):
+        if not value:
+            return value
+        try:
+            parsed = urlsplit(value)
+            if parsed.port is not None and not 1 <= parsed.port <= 65535:
+                raise ValueError("Invalid port")
+        except ValueError:
+            raise ValueError("Use an HTTP(S) URL without credentials") from None
+        if (parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None
+                or "\\" in value or any(ord(ch) <= 32 or ord(ch) == 127 for ch in value)):
+            raise ValueError("Use an HTTP(S) URL without credentials")
+        return value
+
+    @model_validator(mode="after")
+    def bounded_unique_groups(self):
+        ids = [group.id for group in self.ingredient_groups]
+        rows = [row.id for group in self.ingredient_groups for row in group.ingredients]
+        if len(ids) != len(set(ids)) or len(rows) != len(set(rows)):
+            raise ValueError("Group and ingredient IDs must be unique")
+        if len(rows) > 1000:
+            raise ValueError("Too many ingredients")
+        if sum(len(getattr(self, key)) for key in ("source_text", "description", "directions", "notes", "unclassified", "modifications")) > 300_000:
+            raise ValueError("Recipe is too large")
+        return self
+
+
+class RecipeUpdate(RecipeDraft):
+    expected_revision: int = Field(ge=1, le=2_147_483_647)
+
+
+class GramEstimate(BaseModel):
+    model_config = ConfigDict(extra="allow", allow_inf_nan=False)
+    amount: float | str | None = None
+    low: float | None = None
+    high: float | None = None
+    estimated: bool = True
+    basis: str = ""
+
+
+class IngredientOutput(BaseModel):
+    id: str
+    original_text: str
+    quantity: str | None = None
+    quantity_max: str | None = None
+    unit: str = ""
+    name: str = ""
+    preparation: str = ""
+    optional: bool = False
+    grams: GramEstimate | None = None
+
+
+class IngredientGroupOutput(BaseModel):
+    id: str
+    name: str
+    ingredients: list[IngredientOutput]
+
+
+class Recipe(BaseModel):
+    id: str
+    revision: int
+    owner_id: str | None
+    author_name: str | None
+    can_edit: bool
+    enrichment_status: str
+    photos: list[dict] = Field(default_factory=list)
+    title: str
+    source_text: str
+    mode: Literal["text", "structured"]
+    description: str
+    ingredient_groups: list[IngredientGroupOutput]
+    directions: str
+    notes: str
+    unclassified: str = ""
+    tags: list[str]
+    yield_amount: str | None
+    yield_unit: str
+    source_url: str
+    modifications: str
+
+
+class ParseRequest(StrictDTO):
+    source_text: Annotated[str, Field(min_length=1, max_length=100_000)]
+
+    @field_validator("source_text")
+    @classmethod
+    def nonblank_source(cls, value):
+        if not value.strip():
+            raise ValueError("Source text is required")
+        return value

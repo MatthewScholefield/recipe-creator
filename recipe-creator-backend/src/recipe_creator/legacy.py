@@ -1,0 +1,161 @@
+"""Lossless import of an explicitly supplied prototype JSON export; never contacts it."""
+from copy import deepcopy
+from dataclasses import asdict, dataclass, field
+import hashlib
+import json
+from pathlib import Path
+from uuid import UUID, NAMESPACE_URL, uuid5
+
+from .repository import ConflictError, Repository
+
+
+def _object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Duplicate JSON object key: {key!r}")
+        result[key] = value
+    return result
+
+
+def load_snapshot(path: Path) -> list[dict]:
+    """Accept a JSON list or {\"recipes\": [...]} without losing object order."""
+    def invalid_constant(value):
+        raise ValueError(f"Invalid JSON number: {value}")
+
+    data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_object,
+                      parse_constant=invalid_constant)
+    if isinstance(data, dict):
+        data = data.get("recipes")
+    if not isinstance(data, list):
+        raise ValueError("Expected a JSON list or an object containing a recipes list")
+    return data
+
+
+def snapshot_hash(record: dict) -> str:
+    # Do not sort keys: category order is meaningful in the original object.
+    return hashlib.sha256(json.dumps(record, ensure_ascii=False, separators=(",", ":"),
+                                    allow_nan=False).encode()).hexdigest()
+
+
+def convert_recipe(record: dict) -> dict:
+    """No parsing, normalization, inferred authorship, or inferred publication date."""
+    if not isinstance(record, dict):
+        raise ValueError("Each recipe must be an object")
+    identifier = record.get("uuid")
+    if not isinstance(identifier, str):
+        raise ValueError("Recipe uuid must be a UUID string")
+    try:
+        parsed = UUID(identifier)
+    except ValueError as exc:
+        raise ValueError("Recipe uuid must be a UUID string") from exc
+    if str(parsed) != identifier.lower():
+        raise ValueError("Recipe uuid must use the hyphenated UUID format")
+    for key in ("title", "description", "directions", "notes"):
+        if not isinstance(record.get(key), str):
+            raise ValueError(f"Recipe {identifier}: {key} must be a string")
+    tags = record.get("tags")
+    if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+        raise ValueError(f"Recipe {identifier}: tags must be a list of strings")
+    categories = record.get("ingredientCategories")
+    if not isinstance(categories, dict):
+        raise ValueError(f"Recipe {identifier}: ingredientCategories must be an object")
+    groups = []
+    for index, (name, lines) in enumerate(categories.items()):
+        if not isinstance(name, str) or not isinstance(lines, list) or any(
+            not isinstance(line, str) for line in lines
+        ):
+            raise ValueError(f"Recipe {identifier}: ingredient categories must contain string lists")
+        group_id = str(uuid5(NAMESPACE_URL, f"legacy:{identifier}:group:{index}"))
+        groups.append({"id": group_id, "name": name, "ingredients": [
+            {"id": str(uuid5(NAMESPACE_URL, f"{group_id}:ingredient:{row}")),
+             "original_text": line, "quantity": None, "unit": "", "name": line}
+            for row, line in enumerate(lines)
+        ]})
+    body = [record["description"]]
+    for group in groups:
+        body.append((f"=== {group['name']} ===\n" if group["name"] else "")
+                    + "\n".join(row["original_text"] for row in group["ingredients"]))
+    body.extend([record["directions"], record["notes"]])
+    return {
+        "title": record["title"], "description": record["description"],
+        "mode": "structured", "status": "published", "source_text": "\n\n".join(body),
+        "ingredient_groups": groups, "directions": record["directions"], "notes": record["notes"],
+        "tags": deepcopy(tags), "source_url": "", "modifications": "", "revision": 1,
+        "owner_id": None, "legacy_uuid": identifier, "legacy_created_at": None,
+        "original_snapshot": deepcopy(record), "original_snapshot_hash": snapshot_hash(record),
+    }
+
+
+@dataclass
+class ImportReport:
+    total: int
+    created: list[str] = field(default_factory=list)
+    would_create: list[str] = field(default_factory=list)
+    duplicates: list[str] = field(default_factory=list)
+    unchanged: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    dry_run: bool = False
+
+    @property
+    def ok(self):
+        return not self.errors and not self.conflicts
+
+    def as_dict(self):
+        return {**asdict(self), "ok": self.ok}
+
+
+async def import_recipes(repo: Repository, records: list[dict], *, dry_run=False) -> ImportReport:
+    """Validate the entire snapshot before writes; insert recipe/history atomically.
+
+    Existing records are compared to immutable import history, not current edited
+    content. Conflicts abort the entire import; repeat runs never overwrite edits.
+    """
+    report = ImportReport(total=len(records), dry_run=dry_run)
+    candidates = {}
+    for index, record in enumerate(records):
+        try:
+            data = convert_recipe(record)
+        except (ValueError, TypeError) as exc:
+            report.errors.append(f"Row {index + 1}: {exc}")
+            continue
+        identifier = record["uuid"]
+        if identifier in candidates:
+            report.duplicates.append(identifier)
+            if candidates[identifier]["original_snapshot_hash"] != data["original_snapshot_hash"]:
+                report.conflicts.append(identifier)
+        else:
+            candidates[identifier] = data
+    if report.errors or report.conflicts:
+        return report
+
+    try:
+        async with repo.transaction() as tx:
+            for identifier, data in candidates.items():
+                current = await tx.get("recipes", identifier)
+                original = await tx.get("revisions", f"legacy-{identifier}")
+                if current is not None or original is not None:
+                    if current is not None and original is not None and original.get("content", {}).get(
+                        "original_snapshot_hash"
+                    ) == data["original_snapshot_hash"]:
+                        report.unchanged.append(identifier)
+                    else:
+                        report.conflicts.append(identifier)
+                else:
+                    report.would_create.append(identifier)
+            if not report.ok or dry_run:
+                return report
+            for identifier in report.would_create:
+                data = candidates[identifier]
+                await tx.create("recipes", data, id=identifier)
+                await tx.create("revisions", {
+                    "recipe_id": identifier, "actor_id": None, "revision": 1,
+                    "reason": "legacy_import", "content": deepcopy(data),
+                }, id=f"legacy-{identifier}")
+            report.created = list(report.would_create)
+            report.would_create.clear()
+    except ConflictError:
+        report.created.clear()
+        report.conflicts.append("Concurrent database change; rerun the import")
+    return report
