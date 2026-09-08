@@ -14,8 +14,13 @@ from recipe_creator.settings import Settings
 class Logger:
     def __init__(self):
         self.calls = []
+        self.exception = None
 
-    def exception(self, message, *args):
+    def opt(self, *, exception):
+        self.exception = exception
+        return self
+
+    def error(self, message, *args):
         self.calls.append((message, args))
 
 
@@ -60,7 +65,7 @@ async def test_logly_middleware_serves_session_through_asgi_stack(log_output):
     assert "private name" not in output
 
 
-async def test_logly_middleware_sanitizes_unexpected_asgi_failure(monkeypatch, log_output):
+async def test_logly_middleware_logs_unexpected_failure_with_traceback(monkeypatch, log_output):
     application = app.create_app(run_jobs=False)
 
     async def fail(request):
@@ -69,14 +74,16 @@ async def test_logly_middleware_sanitizes_unexpected_asgi_failure(monkeypatch, l
     monkeypatch.setattr(app.identity, "get_context", fail)
     # Keep raise_app_exceptions=True: the stack must handle the error itself.
     async with AsyncClient(transport=ASGITransport(app=application), base_url="https://testserver") as client:
-        response = await client.get("/api/session")
+        response = await client.get("/api/session", headers={"authorization": "Bearer private-token"})
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Service temporarily unavailable"
     assert "provider secret token" not in response.text
     output = log_output.getvalue()
-    assert "Request failed (RuntimeError)" in output
-    assert "provider secret token" not in output
+    assert "Request failed" in output
+    assert "RuntimeError: provider secret token" in output
+    assert "Traceback" in output
+    assert "private-token" not in output
 
 
 def test_server_keeps_uvicorn_logging_integration(monkeypatch):
@@ -92,7 +99,7 @@ def test_server_keeps_uvicorn_logging_integration(monkeypatch):
     assert kwargs["log_config"] is None
 
 
-async def test_parse_failure_is_logged_without_exposing_error(monkeypatch):
+async def test_parse_failure_logs_exception_and_returns_generic_503(monkeypatch):
     async def allow(*args, **kwargs):
         return None
 
@@ -110,10 +117,12 @@ async def test_parse_failure_is_logged_without_exposing_error(monkeypatch):
     with pytest.raises(HTTPException, match="temporarily unavailable") as error:
         await recipes.parse(request, recipes.ParseRequest(source_text="private recipe text"))
     assert error.value.status_code == 503
-    assert logger.calls == [("Recipe parsing failed ({})", ("RuntimeError",))]
+    assert logger.calls == [("Recipe parsing failed", ())]
+    assert isinstance(logger.exception, RuntimeError)
+    assert str(logger.exception) == "provider secret token"
 
 
-async def test_job_polling_failure_is_logged_without_error_contents(monkeypatch):
+async def test_job_polling_failure_logs_exception(monkeypatch):
     runner = jobs.JobRunner(None, Settings())
     logger = Logger()
 
@@ -124,4 +133,6 @@ async def test_job_polling_failure_is_logged_without_error_contents(monkeypatch)
     monkeypatch.setattr(runner, "run_once", fail)
     monkeypatch.setattr(jobs, "logger", logger)
     await runner.run()
-    assert logger.calls == [("Enrichment polling failed ({})", ("RuntimeError",))]
+    assert logger.calls == [("Enrichment polling failed", ())]
+    assert isinstance(logger.exception, RuntimeError)
+    assert str(logger.exception) == "provider secret token"

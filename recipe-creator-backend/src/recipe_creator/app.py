@@ -30,7 +30,7 @@ async def cleanup_loop(photos):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.error("Media cleanup failed ({})", type(exc).__name__)
+            logger.opt(exception=exc).error("Media cleanup failed")
         await asyncio.sleep(3600)
 
 
@@ -96,7 +96,7 @@ def create_app(settings: Settings | None = None, repo=None, run_jobs=True):
 
     @app.exception_handler(Exception)
     async def unexpected_error(request, exc):
-        logger.error("Request failed ({})", type(exc).__name__)
+        logger.opt(exception=exc).error("Request failed")
         return error_response(503, "Service temporarily unavailable")
 
     @app.middleware("http")
@@ -115,7 +115,7 @@ def create_app(settings: Settings | None = None, repo=None, run_jobs=True):
         try:
             await request.app.state.repo.list("recipes", limit=1)
         except Exception as exc:
-            logger.error("Readiness check failed ({})", type(exc).__name__)
+            logger.opt(exception=exc).error("Readiness check failed")
             raise HTTPException(503, "Not ready") from None
         return {"status": "ok"}
 

@@ -526,7 +526,7 @@ async def parse(request: Request, body: ParseRequest):
         result["unclassified"] = "".join(piece["text"] for piece in gaps) if isinstance(gaps, list) else gaps
         return result
     except Exception as exc:
-        logger.exception("Recipe parsing failed ({})", type(exc).__name__)
+        logger.opt(exception=exc).error("Recipe parsing failed")
         raise HTTPException(503, "Recipe parsing is temporarily unavailable") from None
 
 

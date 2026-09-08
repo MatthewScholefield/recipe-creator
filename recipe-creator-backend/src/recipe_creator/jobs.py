@@ -125,8 +125,7 @@ class JobRunner:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                # Provider/database messages can contain source text or credentials.
-                logger.exception("Enrichment polling failed ({})", type(exc).__name__)
+                logger.opt(exception=exc).error("Enrichment polling failed")
             try:
                 await asyncio.wait_for(self._stop.wait(), self.settings.job_poll_seconds)
             except TimeoutError:
