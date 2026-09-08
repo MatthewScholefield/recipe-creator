@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import { message, photoUrl, request } from './api';
   import { load, save } from './local';
   import { browseUrl, bookmarkIds, mealGroup, MEAL_CLASSIFIERS, uniqueTags } from './browse-query';
@@ -19,15 +19,32 @@
   let tagError = $state(''), pickerOpen = $state(false), drafts = $state<DraftSummary[]>([]);
   let savedProgress = $state({done: 0, total: 0}), unavailable = $state<string[]>([]), invalidBookmarks = $state(0);
   let failedBatches = $state<number[]>([]), generation = 0, controller: AbortController | undefined;
-  let pickerTags = $state<string[]>([]);
   const selected = $derived(uniqueTags(selectedTags));
   const active = $derived(Boolean(query || selected.length));
-  const visible = $derived([...items].sort((a, b) => a.title.localeCompare(b.title)));
+  const visible = $derived(savedOnly ? items : [...items].sort((a, b) => a.title.localeCompare(b.title)));
   const groups = $derived(active || savedOnly
     ? [{name: savedOnly ? 'Saved recipes' : 'Results', items: visible}]
     : [...classifiers, 'Other'].map(name => ({name, items: visible.filter(recipe => mealGroup(recipe.tags || [], classifiers) === name)})));
   const quickTags = $derived(tags.filter(tag => !selected.some(value => value.localeCompare(tag, undefined, {sensitivity: 'accent'}) === 0)).slice(0, 6));
-  const bookmarks = $derived(bookmarkIds(load<unknown>('bookmarks', [])));
+
+  function clipQuickTags(node: HTMLDivElement, _tags: string[]) {
+    let disposed = false;
+    function measure() {
+      const edge = node.getBoundingClientRect().right;
+      for (const link of node.querySelectorAll('a')) {
+        const clipped = link.getBoundingClientRect().right > edge;
+        link.inert = clipped;
+        link.style.visibility = clipped ? 'hidden' : '';
+        if (clipped) link.setAttribute('aria-hidden', 'true');
+        else link.removeAttribute('aria-hidden');
+      }
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    async function update() { await tick(); if (!disposed) measure(); }
+    void update();
+    return {update, destroy() { disposed = true; observer.disconnect(); }};
+  }
 
   function link(nextTags = selected) { return browseUrl({q: query, tags: uniqueTags(nextTags), saved: savedOnly}); }
   function navigate(url: string) { history.pushState({}, '', url); window.dispatchEvent(new PopStateEvent('popstate')); }
@@ -53,7 +70,7 @@
     finally { if (token === generation) busy = false; }
   }
   async function loadSaved(retry: number[] | null = null) {
-    const token = ++generation, values = bookmarks, signal = requestSignal().signal;
+    const token = ++generation, values = bookmarkIds(load<unknown>('bookmarks', [])), signal = requestSignal().signal;
     invalidBookmarks = values.invalid;
     const chunks = Array.from({length: Math.ceil(values.ids.length / 100)}, (_, index) => values.ids.slice(index * 100, (index + 1) * 100));
     const indexes = retry || chunks.map((_, index) => index);
@@ -117,7 +134,7 @@
 
 {#if !savedOnly && drafts.length}<section class="drafts" aria-labelledby="drafts-heading"><div><p class="eyebrow">On this device</p><h2 id="drafts-heading">Your drafts</h2></div><div class="draft-cards">{#each drafts as draft (draft.id)}<article class="draft-card"><span class="draft-badge">Draft</span><h3>{draft.name}</h3><p>Updated {new Date(draft.updatedAt).toLocaleDateString()}</p><a href={draftHref(draft.id)}>Resume</a></article>{/each}</div></section>{/if}
 
-{#if !savedOnly}<section class="tag-filters" aria-label="Recipe filters"><div class="quick-tags">{#each quickTags as tag}<a href={link([...selected, tag])}>{tag}</a>{/each}</div><button type="button" class="search-tags" onclick={() => pickerOpen = !pickerOpen} aria-expanded={pickerOpen}><Icon name="search" size={16} />Search tags</button>{#if pickerOpen}<TagPicker tags={tags} bind:selected={pickerTags} label="Search tags" placeholder="Search tags" allowCreate={false} onchange={(value) => { if (value.length) {setTags([...selected, value.at(-1)!]); pickerTags = [];} }} />{/if}{#if tagError}<p class="notice" role="status">{tagError}</p>{/if}</section>{/if}
+<section class="tag-filters" aria-label="Recipe filters"><div class="quick-tags" use:clipQuickTags={quickTags}>{#each quickTags as tag}<a href={link([...selected, tag])}>{tag}</a>{/each}</div><button type="button" class="search-tags" onclick={() => pickerOpen = !pickerOpen} aria-expanded={pickerOpen}><Icon name="search" size={16} />Search tags</button>{#if pickerOpen}<TagPicker tags={tags} selected={selected} label="Search tags" placeholder="Search tags" allowCreate={false} onchange={setTags} />{/if}{#if tagError}<p class="notice" role="status">{tagError}</p>{/if}</section>
 
 {#if selected.length || query}<div class="active-filters" aria-label="Active filters">{#if query}<a class="filter-chip" href={browseUrl({q: '', tags: selected, saved: savedOnly})}>Search: {query}<Icon name="x" size={14} /></a>{/if}{#each selected as tag}<a class="filter-chip" href={link(selected.filter(value => value !== tag))}>{tag}<Icon name="x" size={14} /></a>{/each}<button type="button" onclick={clearFilters}>Clear all</button></div>{/if}
 
@@ -132,5 +149,5 @@
 {#if more && !savedOnly}<button class="load-more" disabled={busy} onclick={() => void fetchPage()}>Load more recipes</button>{/if}
 
 <style>
-  .page-heading,.drafts,.tag-filters,.active-filters{display:flex;gap:1rem;align-items:center;justify-content:space-between}.bookmark-link,.search-tags{display:inline-flex;align-items:center;gap:.35rem}.drafts,.tag-filters,.active-filters{margin:1rem 0;align-items:flex-start}.drafts{display:block}.draft-cards,.cards{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))}.draft-card{border:1px solid var(--ui-control-border);border-radius:.5rem;padding:.8rem}.draft-card h3{margin:.35rem 0}.draft-card p{margin:.35rem 0;color:var(--ui-muted)}.draft-badge,.filter-chip{display:inline-flex;align-items:center;gap:.25rem;border-radius:999px;padding:.15rem .5rem;background:var(--ui-surface-muted)}.quick-tags,.active-filters{display:flex;gap:.4rem;flex-wrap:wrap}.quick-tags{flex:1;overflow:hidden;white-space:nowrap}.quick-tags a{flex:none}.tag-filters :global(.tag-picker){width:min(100%,28rem)}.recipe-group{margin:1.5rem 0}.card{position:relative}.card img{float:right;object-fit:cover;border-radius:.35rem;margin-left:.75rem}.excerpt{color:var(--ui-muted)}
+  .page-heading,.drafts,.tag-filters,.active-filters{display:flex;gap:1rem;align-items:center;justify-content:space-between}.bookmark-link,.search-tags{display:inline-flex;align-items:center;gap:.35rem}.drafts,.tag-filters,.active-filters{margin:1rem 0;align-items:flex-start}.drafts{display:block}.draft-cards,.cards{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))}.draft-card{border:1px solid var(--ui-control-border);border-radius:.5rem;padding:.8rem}.draft-card h3{margin:.35rem 0}.draft-card p{margin:.35rem 0;color:var(--ui-muted)}.draft-badge,.filter-chip{display:inline-flex;align-items:center;gap:.25rem;border-radius:999px;padding:.15rem .5rem;background:var(--ui-surface-muted)}.quick-tags,.active-filters{display:flex;gap:.4rem;flex-wrap:wrap}.tag-filters{flex-wrap:wrap}.search-tags{flex-shrink:0}.quick-tags{flex:1;min-width:0;overflow:hidden;white-space:nowrap;flex-wrap:nowrap}.quick-tags a{flex:none}.tag-filters :global(.tag-picker){flex-basis:100%;width:min(100%,28rem)}.recipe-group{margin:1.5rem 0}.card{position:relative}.card img{float:right;object-fit:cover;border-radius:.35rem;margin-left:.75rem}.excerpt{color:var(--ui-muted)}
 </style>
