@@ -1,9 +1,12 @@
 import logging
+from io import StringIO
 
 import pytest
 from fastapi import HTTPException
+from httpx import ASGITransport, AsyncClient
+from logly import logger as logly_logger
 
-from recipe_creator import app, jobs, recipes
+from recipe_creator import app, jobs, recipes, server
 from recipe_creator.logging import configure_logging
 from recipe_creator.settings import Settings
 
@@ -16,14 +19,77 @@ class Logger:
         self.calls.append((message, args))
 
 
-def test_configure_logging_intercepts_stdlib_records():
+@pytest.fixture
+def log_output():
+    output = StringIO()
+    sink = logly_logger.add(output, format="{message}\n{exception}", enqueue=False)
+    try:
+        yield output
+    finally:
+        logly_logger.remove(sink)
+
+
+def test_configure_logging_intercepts_stdlib_records(log_output):
     configure_logging()
     assert [type(handler).__name__ for handler in logging.getLogger().handlers] == ["InterceptHandler"]
+    logging.getLogger(__name__).info("stdlib integration works")
+    assert "stdlib integration works" in log_output.getvalue()
 
 
-def test_app_registers_logly_middleware():
+async def test_logly_middleware_serves_session_through_asgi_stack(log_output):
     application = app.create_app(run_jobs=False)
-    assert any(middleware.cls.__name__ == "LoglyMiddleware" for middleware in application.user_middleware)
+    # ASGITransport does not run lifespan; anonymous sessions need no database.
+    application.state.repo = object()
+    async with AsyncClient(transport=ASGITransport(app=application), base_url="https://testserver") as client:
+        response = await client.get("/api/session", headers={"authorization": "Bearer private-token"})
+        rejected = await client.post("/api/identity", json={"display_name": "private name"})
+        missing = await client.get("/api/not-a-route")
+
+    assert response.status_code == 200
+    assert response.json()["user"] is None
+    assert len(response.json()["csrf_token"]) == 64
+    assert "recipe_csrf" in response.cookies
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert rejected.status_code == 403
+    assert missing.status_code == 404
+    output = log_output.getvalue()
+    assert "GET /api/session " in output
+    assert "POST /api/identity " in output
+    assert "private-token" not in output
+    assert "private name" not in output
+
+
+async def test_logly_middleware_sanitizes_unexpected_asgi_failure(monkeypatch, log_output):
+    application = app.create_app(run_jobs=False)
+
+    async def fail(request):
+        raise RuntimeError("provider secret token")
+
+    monkeypatch.setattr(app.identity, "get_context", fail)
+    # Keep raise_app_exceptions=True: the stack must handle the error itself.
+    async with AsyncClient(transport=ASGITransport(app=application), base_url="https://testserver") as client:
+        response = await client.get("/api/session")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Service temporarily unavailable"
+    assert "provider secret token" not in response.text
+    output = log_output.getvalue()
+    assert "Request failed (RuntimeError)" in output
+    assert "provider secret token" not in output
+
+
+def test_server_keeps_uvicorn_logging_integration(monkeypatch):
+    calls = []
+    monkeypatch.setattr("sys.argv", ["recipe-creator-server"])
+    monkeypatch.setattr(server, "setup_uvicorn_logging", lambda: calls.append("logging"))
+    monkeypatch.setattr(server.uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+    server.main()
+    assert calls[0] == "logging"
+    args, kwargs = calls[1]
+    assert args == ("recipe_creator.app:create_app",)
+    assert kwargs["factory"] is True
+    assert kwargs["log_config"] is None
 
 
 async def test_parse_failure_is_logged_without_exposing_error(monkeypatch):

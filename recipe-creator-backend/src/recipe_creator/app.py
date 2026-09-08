@@ -13,7 +13,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import admin, identity, recipes
 from .ai import AIQuotaExceeded
 from .jobs import JobRunner
-from .logging import configure_logging
+from .logging import configure_logging, logly_dispatch
 from .photos import PhotoService
 from .repository import ConflictError, NotFoundError, Repository
 from .security import SecurityMiddleware, client_ip, get_context, rate_limit, require_user
@@ -30,7 +30,7 @@ async def cleanup_loop(photos):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.exception("Media cleanup failed ({})", type(exc).__name__)
+            logger.error("Media cleanup failed ({})", type(exc).__name__)
         await asyncio.sleep(3600)
 
 
@@ -66,7 +66,7 @@ def create_app(settings: Settings | None = None, repo=None, run_jobs=True):
     app = FastAPI(title="Recipe Creator", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.add_middleware(SecurityMiddleware)
-    app.add_middleware(LoglyMiddleware)
+    app.add_middleware(LoglyMiddleware, dispatch=logly_dispatch)
     app.include_router(identity.router, prefix="/api")
     app.include_router(recipes.router, prefix="/api")
     app.include_router(admin.router, prefix="/api")
@@ -96,7 +96,7 @@ def create_app(settings: Settings | None = None, repo=None, run_jobs=True):
 
     @app.exception_handler(Exception)
     async def unexpected_error(request, exc):
-        logger.exception("Request failed ({})", type(exc).__name__)
+        logger.error("Request failed ({})", type(exc).__name__)
         return error_response(503, "Service temporarily unavailable")
 
     @app.middleware("http")
@@ -115,7 +115,7 @@ def create_app(settings: Settings | None = None, repo=None, run_jobs=True):
         try:
             await request.app.state.repo.list("recipes", limit=1)
         except Exception as exc:
-            logger.exception("Readiness check failed ({})", type(exc).__name__)
+            logger.error("Readiness check failed ({})", type(exc).__name__)
             raise HTTPException(503, "Not ready") from None
         return {"status": "ok"}
 
