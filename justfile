@@ -10,7 +10,7 @@ CLI := UV + " run --project " + BACKEND + " python -m recipe_creator.cli"
 
 # Show the available commands and operational safety notes.
 help:
-    @printf '%s\n' 'just install | db | dev | build | check | test' 'just migrate | cleanup | hash-password | export-openapi' 'just import snapshot.json --dry-run' 'just backup backup.tar.gz --confirm-quiesced' 'just restore backup.tar.gz --confirm-quiesced --confirm-trusted-archive' 'Configure private settings in .env; never put passwords in command arguments.' 'Database: just db starts a local SurrealKV datastore on 127.0.0.1:8000.' 'Backup/restore: stop API, workers and all other writers; leave DB running.' 'Restore: use a NEW database name and absent media path from .env. See CLI --help.'
+    @just --list
 
 # Install locked backend and frontend dependencies.
 install:
@@ -61,29 +61,29 @@ test-frontend:
     {{ NPM }} --prefix {{ FRONTEND }} test
 
 # Apply pending database migrations.
-migrate *args='':
-    {{ CLI }} migrate "$@"
+migrate *args:
+    {{ CLI }} migrate {{args}}
 
 # Import a recipe snapshot.
-import *args='':
-    {{ CLI }} import "$@"
+import *args:
+    {{ CLI }} import {{args}}
 
 # Create a database backup.
-backup *args='':
-    {{ CLI }} backup "$@"
+backup *args:
+    {{ CLI }} backup {{args}}
 
 # Restore a database backup.
-restore *args='':
-    {{ CLI }} restore "$@"
+restore *args:
+    {{ CLI }} restore {{args}}
 
 # Remove expired or orphaned data.
-cleanup *args='':
-    {{ CLI }} cleanup "$@"
+cleanup *args:
+    {{ CLI }} cleanup {{args}}
 
 # Hash an administrator password.
-hash-password *args='':
-    {{ CLI }} hash-password "$@"
+hash-password *args:
+    {{ CLI }} hash-password {{args}}
 
 # Export the current API OpenAPI schema.
-export-openapi *args='':
-    {{ CLI }} export-openapi "$@"
+export-openapi *args:
+    {{ CLI }} export-openapi {{args}}
