@@ -28,14 +28,16 @@ Open `http://localhost:2772`. The API runs on port 2332 with one Uvicorn worker.
 
 AI is optional: add the provider key to `.env` to enable parsing and ingredient estimates. Recipes can still be shared as text without it.
 
-### Configure the admin password
+### Grant administrator permission
 
-From the repository root, run:
+Administrator access is granted to an existing user profile; there is no admin password or password-hash setup. With the database running, apply migrations explicitly before using the permission commands:
 
 ```sh
-just hash-password
+just migrate
+just admin-users
+just admin-grant --user-id <user-id> --yes
 ```
 
-The command prompts for the password twice and prints the exact `RECIPE_ADMIN_PASSWORD_HASH=...` line to add to the root `.env` file. Restart the API after updating `.env`; log in at `/admin` with the original password. Keep `.env` private and never commit it.
+`admin-users` lists active, unmerged profiles without credentials. Omit `--user-id` from `admin-grant` to select a profile interactively; noninteractive use requires both `--user-id` and `--yes`. To revoke permission, run `just admin-revoke --user-id <user-id>` and confirm the requested user ID. Keep `.env` private and never commit it.
 
 `just help` lists build, import, backup, and restore commands. Maintenance recipes accept CLI arguments directly, for example `just import snapshot.json --dry-run`. Production uses static frontend assets, FastAPI, and SurrealDB; configure HTTPS, secure cookies, allowed origins, and persistent storage in `.env` before deployment. Keep `.env` private and never commit it.

@@ -81,9 +81,17 @@ restore *args:
 cleanup *args:
     {{ CLI }} cleanup {{args}}
 
-# Hash an administrator password.
-hash-password *args:
-    {{ CLI }} hash-password {{args}}
+# List recent active profiles for administrator permission changes.
+admin-users *args:
+    {{ CLI }} admin-users {{args}}
+
+# Grant administrator permission to a user profile.
+admin-grant *args:
+    {{ CLI }} admin-grant {{args}}
+
+# Revoke administrator permission from a user profile.
+admin-revoke *args:
+    {{ CLI }} admin-revoke {{args}}
 
 # Export the current API OpenAPI schema.
 export-openapi *args:
