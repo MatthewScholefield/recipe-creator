@@ -10,41 +10,32 @@ from test_identity import client, csrf, identity_app, profile
 
 
 async def login(browser):
-    await csrf(browser)
-    response = await browser.post("/admin/login", json={"password": "test-password"})
-    assert response.status_code == 200, response.text
+    session = await csrf(browser)
+    if not session['user']:
+        session = await profile(browser, 'Operator')
+    repo = browser._transport.app.state.repo
+    await repo.update('users', session['user']['id'], {'is_admin': True})
 
 
 @pytest.mark.integration
-async def test_admin_separate_hash_session_logout_and_limits(identity_app, monkeypatch):
+async def test_admin_live_user_permission_and_retired_cookies(identity_app):
     repo = identity_app.state.repo
-    event_thread = get_ident()
-    verify = admin.password_hasher.verify
-    worker_threads = []
-    def checked_verify(*args):
-        worker_threads.append(get_ident())
-        assert get_ident() != event_thread
-        return verify(*args)
-    monkeypatch.setattr(type(admin.password_hasher), "verify", lambda self, *args: checked_verify(*args))
     async with client(identity_app) as browser:
-        await profile(browser, "Admin")
-        assert (await browser.get("/admin/users")).status_code == 401
-        assert (await browser.post("/admin/login", json={"password": "wrong"})).status_code == 401
+        user = (await profile(browser, 'Admin'))['user']
+        assert (await browser.get('/admin/users')).status_code == 403
+        assert (await browser.post('/admin/login', json={'password': 'test-password'})).status_code == 404
+        await repo.create('admin_sessions', {'secret_hash': digest('old'), 'expires_at': now() + timedelta(days=1)})
+        browser.cookies.set(ADMIN_COOKIE, 'old')
+        assert not (await browser.get('/session')).json()['admin']
         await login(browser)
-        secret = browser.cookies[ADMIN_COOKIE]
-        rows = await repo.list("admin_sessions")
-        assert rows[0]["secret_hash"] == digest(secret)
-        assert (await browser.get("/session")).json()["admin"]
-        await repo.update("admin_sessions", rows[0]["id"], {"expires_at": now() - timedelta(seconds=1)})
-        assert (await browser.get("/admin/users")).status_code == 401
+        assert (await browser.get('/session')).json()['admin']
+        assert 'is_admin' not in (await browser.get('/session')).json()['user']
+        await repo.update('users', user['id'], {'is_admin': False})
+        assert (await browser.get('/admin/users')).status_code == 403
         await login(browser)
-        secret = browser.cookies[ADMIN_COOKIE]
-        assert (await browser.post("/admin/logout")).status_code == 200
-        browser.cookies.set(ADMIN_COOKIE, secret)
-        assert (await browser.get("/admin/users")).status_code == 401
-        identity_app.state.settings.login_attempt_limit = 3
-        assert (await browser.post("/admin/login", json={"password": "test-password"})).status_code == 429
-        assert worker_threads
+        session = (await browser.get('/session')).json()
+        await repo.update('devices', session['device_id'], {'revoked_at': now()})
+        assert (await browser.get('/admin/users')).status_code == 401
 
 
 @pytest.mark.integration
@@ -53,14 +44,14 @@ async def test_admin_users_owner_revisions_restore_and_audit(identity_app):
     async with client(identity_app) as browser:
         user = (await profile(browser))["user"]
         recipe = await repo.create("recipes", {"title": "Original", "source_text": "Do not rewrite me", "status": "published"})
-        assert (await browser.post(f"/admin/recipes/{recipe['id']}/owner", json={"owner_id": user["id"]})).status_code == 401
+        assert (await browser.post(f"/admin/recipes/{recipe['id']}/owner", json={"owner_id": user["id"], "expected_revision": 1})).status_code == 403
         await login(browser)
         users = (await browser.get("/admin/users", params={"q": "alice"})).json()
         assert users["total"] == 1 and users["items"] == users["users"]
         patch = await browser.patch("/admin/users/" + user["id"], json={"photo_trusted": True})
         assert patch.json()["user"]["photo_trusted"]
         assert (await repo.get("users", user["id"]))["photo_trust"]
-        assigned = await browser.post(f"/admin/recipes/{recipe['id']}/owner", json={"owner_id": user["id"]})
+        assigned = await browser.post(f"/admin/recipes/{recipe['id']}/owner", json={"owner_id": user["id"], "expected_revision": 1})
         assert assigned.status_code == 200, assigned.text
         current = await repo.save_recipe_revision(recipe["id"], assigned.json()["revision"], {"title": "Changed", "deleted_at": now()})
         listing = (await browser.get(f"/admin/recipes/{recipe['id']}/revisions")).json()
@@ -86,7 +77,7 @@ async def test_merge_transaction_idempotency_restrictions_usage_and_pagination(i
     repo = identity_app.state.repo
     async with client(identity_app) as source_browser, client(identity_app) as browser:
         source = await profile(source_browser, "Source")
-        target = await profile(browser, "Target")
+        target = {"user": await repo.create("users", {"display_name": "Target"})}
         source_id, target_id = source["user"]["id"], target["user"]["id"]
         pairing = (await source_browser.post("/pairings")).json()
         await login(browser)
@@ -131,7 +122,7 @@ async def test_merge_transaction_idempotency_restrictions_usage_and_pagination(i
         assert not await repo.list("recipes", {"owner_id": source_id})
         assert len(await repo.list("recipes", {"owner_id": target_id})) == 3
         assert len(await repo.list("photos", {"uploader_id": target_id})) == 3
-        assert len(await repo.list("devices", {"user_id": target_id}, limit=1000)) == 503
+        assert len(await repo.list("devices", {"user_id": target_id}, limit=1000)) == 502
         assert ("devices", 500) in calls
         assert (await repo.get("pairings", pairing["id"]))["status"] == "revoked"
         assert (await repo.get("usage", photo_target_key))["count"] == 6
@@ -162,6 +153,63 @@ async def test_merge_rolls_back_every_write(identity_app, monkeypatch):
         assert (await repo.get("recipes", recipe["id"]))["owner_id"] == source["id"]
         assert (await repo.get("users", source["id"]))["merged_into"] is None
         assert await repo.list("audit") == []
+
+
+@pytest.mark.integration
+async def test_owner_revision_one_race_eligibility_restore_and_rollback(identity_app, monkeypatch):
+    import asyncio
+    from recipe_creator import recipes
+    repo = identity_app.state.repo
+    identity_app.include_router(recipes.router)
+    async with client(identity_app) as browser:
+        await login(browser)
+        operator = (await csrf(browser))['user']
+        target = await repo.create('users', {'display_name': 'Duplicate'})
+        blocked = await repo.create('users', {'display_name': 'Duplicate', 'state': 'blocked'})
+        merged = await repo.create('users', {'display_name': 'Duplicate', 'state': 'merged', 'merged_into': target['id']})
+        directory = (await browser.get('/admin/users?q=duplicate&eligible_owner=true&limit=1')).json()
+        assert directory['total'] == 1 and directory['items'][0]['id'] == target['id'] and not directory['has_more']
+        assert not {'is_admin', 'secret_hash', 'payload'} & directory['items'][0].keys()
+        recipe = (await browser.post('/recipes', json={'title': 'Original', 'source_text': 'Exact\r\nprose'})).json()
+        rid = recipe['id']
+        url = f'/admin/recipes/{rid}/owner'
+        for user in (blocked, merged):
+            assert (await browser.post(url, json={'owner_id': user['id'], 'expected_revision': 1})).status_code == 422
+        assert (await browser.post(url, json={'owner_id': target['id']})).status_code == 422
+        results = await asyncio.gather(*(browser.post(url, json={'owner_id': target['id'], 'expected_revision': 1}) for _ in range(2)))
+        assert sorted(result.status_code for result in results) == [200, 409]
+        result = next(result.json() for result in results if result.status_code == 200)
+        assert result['author_name'] == 'Duplicate' and result['revision'] == 2
+        assert len(await repo.list('revisions', {'recipe_id': rid, 'revision': 1})) == 1
+        assert (await repo.get('recipes', rid))['source_text'] == 'Exact\r\nprose'
+        invalid = await repo.create('revisions', {'recipe_id': rid, 'revision': 99, 'content': {'tags': ['Dinner', 'breakfast']}})
+        assert (await browser.post(f'/admin/recipes/{rid}/restore', json={'revision_id': invalid['id'], 'expected_revision': 2})).status_code == 422
+        assert (await repo.get('recipes', rid))['revision'] == 2
+        async def fail(*args, **kwargs):
+            raise RuntimeError('audit failure')
+        monkeypatch.setattr(admin, 'audit', fail)
+        with pytest.raises(RuntimeError, match='audit failure'):
+            await browser.post(url, json={'owner_id': operator['id'], 'expected_revision': 2})
+        assert (await repo.get('recipes', rid))['owner_id'] == target['id']
+        assert (await repo.get('recipes', rid))['revision'] == 2
+        assert not await repo.list('revisions', {'recipe_id': rid, 'revision': 2})
+
+
+@pytest.mark.integration
+async def test_merge_rejects_either_admin_profile(identity_app):
+    repo = identity_app.state.repo
+    async with client(identity_app) as browser:
+        await login(browser)
+        source = await repo.create('users', {'display_name': 'source'})
+        target = await repo.create('users', {'display_name': 'target'})
+        body = {'source_id': source['id'], 'target_id': target['id']}
+        for privileged in (source, target):
+            await repo.update('users', privileged['id'], {'is_admin': True})
+            preview = await browser.post('/admin/merge/preview', json=body)
+            assert preview.status_code == 409 and 'Revoke admin permission' in preview.text
+            assert (await browser.post('/admin/merge', json={**body, 'confirm': True})).status_code == 409
+            await repo.update('users', privileged['id'], {'is_admin': False})
+        assert (await browser.post('/admin/merge/preview', json=body)).status_code == 200
 
 
 @pytest.mark.integration

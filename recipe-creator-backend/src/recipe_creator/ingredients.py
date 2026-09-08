@@ -40,7 +40,7 @@ def parse_quantity(value: str | float | int | None) -> tuple[float, float] | Non
 
     def number(part: str) -> float:
         part = part.strip()
-        if not re.fullmatch(r"(?:\d+(?:\.\d+)?|\d+\s*/\s*\d+|\d+\s+\d+\s*/\s*\d+)", part):
+        if not re.fullmatch(r"(?:\d+(?:\.\d+)?|\.\d+|\d+\s*/\s*\d+|\d+\s+\d+\s*/\s*\d+)", part):
             raise ValueError("Not an amount")
         part = re.sub(r"\s*/\s*", "/", part)
         return float(sum((Fraction(p) for p in part.split()), Fraction()))
@@ -51,6 +51,69 @@ def parse_quantity(value: str | float | int | None) -> tuple[float, float] | Non
         return None
     low, high = values[0], values[-1]
     return (low, high) if 0 <= low <= high and math.isfinite(high) else None
+
+
+UNIT_ALIASES = {}
+for _canonical, _aliases in {
+    'g': 'g gram grams', 'kg': 'kg kilogram kilograms', 'mg': 'mg milligram milligrams',
+    'ml': 'ml milliliter milliliters millilitre millilitres', 'l': 'l liter liters litre litres',
+    'oz': 'oz ounce ounces', 'lb': 'lb lbs pound pounds', 'cup': 'cup cups',
+    'tbsp': 'tbsp tablespoon tablespoons', 'tsp': 'tsp teaspoon teaspoons',
+}.items():
+    UNIT_ALIASES.update(dict.fromkeys(_aliases.split(), _canonical))
+UNIT_ALIASES.update({'fl oz': 'fl oz', 'fl. oz': 'fl oz', 'fluid ounce': 'fl oz', 'fluid ounces': 'fl oz'})
+_NUMBER = r'(?:\d+\s+\d+\s*[/⁄]\s*\d+|\d+\s*[/⁄]\s*\d+|\d*\s*[' + ''.join(_VULGAR) + r']|\d+(?:\.\d+)?|\.\d+)'
+_LINE_AMOUNT = re.compile(r'^(' + _NUMBER + r')(?:\s*(?:[–—-]|\bto\b)\s*(' + _NUMBER + r'))?')
+_UNCERTAIN_LINE = re.compile(r'\b(?:packages?|packets?|packs?|cans?|tins?|jars?|bottles?|boxes?|bags?|sachets?|handfuls?|pinches?|dashes?|or|and/or)\b|[×*=<>]', re.I)
+
+
+def numeric_string(value):
+    return format(value, '.15g')
+
+
+def parse_ingredient_line(text: str) -> dict | None:
+    """Conservative source-only grammar; uncertainty never fabricates amounts."""
+    source = text.strip()
+    if not source or _UNCERTAIN_LINE.search(source) or re.search(r'\b(?:nan|inf|infinity)\b|[∞]', source, re.I):
+        return None
+    optional = source.endswith('(optional)')
+    if optional:
+        source = source[:-10].rstrip()
+    if '(' in source or ')' in source:
+        return None
+    quantity = quantity_max = None
+    unit = ''
+    match = _LINE_AMOUNT.match(source)
+    if match:
+        amount = parse_quantity(match.group(1))
+        high = parse_quantity(match.group(2)) if match.group(2) else None
+        if not amount or amount[1] > 1_000_000_000 or (match.group(2) and (not high or high[0] < amount[0] or high[1] > 1_000_000_000)):
+            return None
+        quantity = numeric_string(amount[0])
+        quantity_max = numeric_string(high[0]) if high else None
+        remaining = source[match.end():]
+        attached = bool(remaining and not remaining[0].isspace())
+        remaining = remaining.lstrip()
+        for alias in sorted(UNIT_ALIASES, key=len, reverse=True):
+            if remaining.casefold().startswith(alias) and len(remaining) > len(alias) and remaining[len(alias)].isspace():
+                unit = UNIT_ALIASES[alias]
+                remaining = remaining[len(alias):].lstrip()
+                break
+        if attached and not unit:
+            return None
+        source = remaining
+    elif not source[0].isalpha():
+        return None
+    if not source or any(ch.isdigit() for ch in source) or re.search(r'[/⁄+–—]|(?<!\w)-(?!\w)', source):
+        return None
+    name, separator, preparation = source.partition(',')
+    name, preparation = name.strip(), preparation.strip()
+    if not separator and name.endswith(' to taste'):
+        name, preparation = name[:-9].rstrip(), 'to taste'
+    if not name or len(name) > 500 or len(preparation) > 2000:
+        return None
+    return {'quantity': quantity, 'quantity_max': quantity_max, 'unit': unit, 'name': name,
+            'preparation': preparation, 'optional': optional, 'grams': None}
 
 
 def convert_to_grams(quantity, unit: str | None) -> tuple[float, float] | None:

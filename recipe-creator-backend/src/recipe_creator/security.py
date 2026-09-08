@@ -93,11 +93,7 @@ async def resolve_context(request: Request, repo) -> Context:
             user = await canonical_user(repo, rows[0]["user_id"])
             if user:
                 context.user, context.device = user, rows[0]
-    secret = request.cookies.get(ADMIN_COOKIE, "")
-    if secret and len(secret) <= 128:
-        rows = await repo.list("admin_sessions", {"secret_hash": digest(secret)}, limit=2)
-        if len(rows) == 1 and active(rows[0]):
-            context.admin, context.admin_session = True, rows[0]
+    context.admin = bool(context.user and context.user.get("is_admin", False))
     return context
 
 
@@ -114,22 +110,21 @@ async def require_user(request: Request) -> Context:
 
 async def require_admin(request: Request) -> Context:
     context = await get_context(request)
+    if not context.user:
+        raise HTTPException(401, "Active profile required")
     if not context.admin:
-        raise HTTPException(401, "Admin login required")
+        raise HTTPException(403, "Admin permission required")
     return context
 
 
 async def authorize(request, tx, admin=False):
     context = await resolve_context(request, tx)
-    if admin:
-        if not context.admin:
-            raise HTTPException(401, "Admin login required")
-        await tx.update("admin_sessions", context.admin_session["id"], {"last_used_at": now()})
-    else:
-        if not context.user:
-            raise HTTPException(401, "Active profile required")
-        await tx.update("devices", context.device["id"], {"last_used_at": now()})
-        await tx.update("users", context.user["id"], {})
+    if not context.user:
+        raise HTTPException(401, "Active profile required")
+    if admin and not context.admin:
+        raise HTTPException(403, "Admin permission required")
+    await tx.update("devices", context.device["id"], {"last_used_at": now()})
+    await tx.update("users", context.user["id"], {})
     return context
 
 

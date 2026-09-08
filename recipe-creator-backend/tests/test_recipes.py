@@ -130,7 +130,7 @@ async def test_search_projection_pagination_and_cache(app, monkeypatch):
     repo = app.state.repo
     async with client(app) as browser:
         await identify(app, browser)
-        for value in [draft(title="Zebra", tags=["dinner", "breakfast"], description="red soup"),
+        for value in [draft(title="Zebra", tags=["breakfast"], description="red soup"),
                       draft(title="Apple", tags=["dinner"], directions="RED SOUP here"),
                       draft(title="Berry", tags=["lunch"], directions="red then soup"),
                       draft(title="Aardvark", tags=["other"], source_text="red soup")]:
@@ -151,7 +151,7 @@ async def test_search_projection_pagination_and_cache(app, monkeypatch):
         assert (await browser.get("/recipes?offset=2&limit=2")).json()["items"][0]["title"] == "Apple"
         assert len(calls) == 1
         result = (await browser.get("/recipes", params={"q": "red soup tag:lunch -tag:dinner"})).json()
-        assert [item["title"] for item in result["items"]] == ["Zebra", "Apple"]
+        assert [item["title"] for item in result["items"]] == ["Apple"]
         assert calls[-1] == ("id",)
         result = (await browser.get("/recipes", params={"q": "tag:absent owner:x"})).json()
         assert len(result["errors"]) == 2
@@ -179,6 +179,9 @@ async def test_owner_admin_blocked_and_scoped_keys(app):
         secret = uuid4().hex
         await app.state.repo.create("admin_sessions", {"secret_hash": digest(secret), "expires_at": now() + timedelta(days=1)})
         anonymous.cookies.set(ADMIN_COOKIE, secret)
+        assert (await anonymous.put(f"/recipes/{unknown['id']}", json=draft(expected_revision=1))).status_code == 401
+        operator = await identify(app, anonymous, "Operator")
+        await app.state.repo.update("users", operator["id"], {"is_admin": True})
         assert (await anonymous.put(f"/recipes/{unknown['id']}", json=draft(expected_revision=1))).status_code == 200
 
 
@@ -217,7 +220,8 @@ async def test_parse_quota_exact_source_and_sanitized_failure(app, monkeypatch):
                 "unclassified": [{"text": source}], "warnings": []}
     monkeypatch.setattr(ai, "parse_recipe", parse)
     async with client(app) as browser:
-        assert (await browser.post("/parse", json={"source_text": "text"})).status_code == 401
+        assert (await browser.post("/parse", json={"source_text": "text"})).status_code == 200
+        assert await app.state.repo.list("users") == []
         await identify(app, browser)
         source = "  source\r\n\n"
         result = await browser.post("/parse", json={"source_text": source})
@@ -232,7 +236,85 @@ async def test_parse_quota_exact_source_and_sanitized_failure(app, monkeypatch):
         assert response.status_code == 503 and "secret" not in response.text
         app.state.settings.ai_daily_limit = 4
         assert (await browser.post("/parse", json={"source_text": source})).status_code == 429
-        assert calls == [source]
+        assert calls == ["text", source]
+
+
+@pytest.mark.parametrize('tags', [['Breakfast', 'DINNER'], ['lunch', 'dessert']])
+def test_classifier_rejection(tags):
+    with pytest.raises(ValidationError, match='Choose only one meal type'):
+        RecipeDraft(**draft(tags=tags))
+
+
+def test_tags_normalize_dedupe_before_bounds():
+    value = RecipeDraft(**draft(tags=[' Dinner ', 'DINNER', 'Cafe\u0301', 'Café', 'Indian']))
+    assert value.tags == ['dinner', 'Café', 'Indian']
+    assert RecipeDraft(**draft(tags=['dinner'] * 100)).tags == ['dinner']
+    with pytest.raises(ValidationError):
+        RecipeDraft(**draft(tags=[' ']))
+
+
+async def test_selected_tags_lookup_privacy_and_complete_retrieval(app):
+    repo = app.state.repo
+    async with client(app) as browser:
+        owner = await identify(app, browser)
+        public_ids = []
+        for i in range(105):
+            row = await repo.create('recipes', {'title': f'Recipe {i}', 'status': 'published',
+                                               'owner_id': owner['id'], 'tags': ['Dinner', 'Vegetarian'],
+                                               'directions': 'Simmer delicious soup', 'description': 'not secret'})
+            public_ids.append(row['id'])
+        hidden = []
+        for state in ['hidden', 'deleted', 'draft']:
+            hidden.append((await repo.create('recipes', {'title': 'private', 'status': state, 'tags': ['SECRET']}))['id'])
+        listing = (await browser.get('/recipes', params=[('q', 'soup'), ('tag', 'dinner'), ('tag', 'vegetarian'), ('limit', '1')])).json()
+        assert listing['total'] == 105 and len(listing['items']) == 1
+        unknown = (await browser.get('/recipes?tag=missing')).json()
+        assert not unknown['items'] and unknown['errors']
+        assert (await browser.get('/recipes?tag=dinner&tag=Vegetarian&owner_id=missing')).json()['total'] == 0
+        catalog = (await browser.get('/tags')).json()
+        assert catalog == {'tags': ['dinner', 'Vegetarian'], 'classifier_tags': ['breakfast', 'lunch', 'dinner', 'dessert']}
+        await repo.update('users', owner['id'], {'is_admin': True})
+        found = []
+        for start in range(0, len(public_ids), 100):
+            result = await browser.post('/recipes/lookup', json={'ids': public_ids[start:start + 100], 'q': 'soup', 'tags': ['dinner', 'vegetarian']})
+            assert result.status_code == 200, result.text
+            found.extend(row['id'] for row in result.json()['items'])
+            assert not result.json()['unavailable_ids']
+        assert found == public_ids
+        pending = await repo.create('photos', {'recipe_id': public_ids[0], 'uploader_id': owner['id'], 'status': 'pending'})
+        result = (await browser.post('/recipes/lookup', json={'ids': [public_ids[0]]})).json()
+        assert result['items'][0]['thumbnail_photo_id'] is None
+        approved = await repo.create('photos', {'recipe_id': public_ids[0], 'uploader_id': owner['id'], 'status': 'approved'})
+        result = (await browser.post('/recipes/lookup', json={'ids': [public_ids[0]]})).json()
+        assert result['items'][0]['thumbnail_photo_id'] == approved['id']
+        assert pending['id'] not in str(result)
+        result = (await browser.post('/recipes/lookup', json={'ids': ['recipes:' + public_ids[0], public_ids[0], *hidden, 'missing'], 'q': 'no match'})).json()
+        assert not result['items'] and result['unavailable_ids'] == [*hidden, 'missing']
+        assert (await browser.post('/recipes/lookup', json={'ids': public_ids})).status_code == 422
+        assert (await browser.post('/recipes/lookup', json={'ids': ['invalid:id']})).status_code == 422
+        # Newly private rows cannot leak through a warm catalog.
+        await repo.update('recipes', public_ids[0], {'status': 'hidden'})
+        result = (await browser.post('/recipes/lookup', json={'ids': [public_ids[0]]})).json()
+        assert result == {'items': [], 'unavailable_ids': [public_ids[0]]}
+
+
+async def test_anonymous_ingredient_quota_and_blocked_credentials(app, monkeypatch):
+    from unittest.mock import AsyncMock
+    fallback = AsyncMock(return_value={'items': [{'id': 'old', 'unparsed': True}]})
+    monkeypatch.setattr(ai, 'parse_ingredient_lines_batch', fallback)
+    async with client(app) as browser:
+        response = await browser.post('/ingredients/parse', json={'lines': [{'id': 'old', 'text': '2 eggs'}]})
+        assert response.status_code == 200 and response.json()['items'][0]['method'] == 'deterministic'
+        assert not await app.state.repo.list('usage') and not await app.state.repo.list('users')
+        app.state.settings.ai_global_daily_limit = 1
+        body = {'lines': [{'id': 'old', 'text': '2 cans beans'}]}
+        results = await asyncio.gather(*(browser.post('/ingredients/parse', json=body, headers={'X-Forwarded-For': f'forged-{i}'}) for i in range(3)))
+        assert sorted(response.status_code for response in results) == [200, 429, 429]
+        assert fallback.await_count == 1
+        user = await identify(app, browser)
+        await app.state.repo.update('users', user['id'], {'state': 'blocked'})
+        assert (await browser.post('/ingredients/parse', json=body)).status_code == 403
+        assert (await browser.post('/parse', json={'source_text': '2 eggs'})).status_code == 403
 
 
 def test_stable_legacy_ids_and_estimate_output():

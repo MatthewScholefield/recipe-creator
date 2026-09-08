@@ -17,12 +17,14 @@ from .jobs import enqueue_enrichment, enrichment_hash
 from .models import EnrichmentJob, Photo, Recipe as RecipeModel, User
 from .photos import PUBLIC_FIELDS
 from surreal_sdk.protocol.cbor import RecordId
-from .schemas import ParseRequest, Recipe, RecipeDraft, RecipeUpdate
+from .schemas import (ParseRequest, ParseResult, Recipe, RecipeDraft, RecipeUpdate, MEAL_CLASSIFIERS,
+                      tag_key, RecipeListResponse, TagCatalog, Tag, RecipeLookupRequest, RecipeLookupResponse,
+                      IngredientLinesRequest, IngredientLinesResult)
 from .security import authorize, client_ip, get_context, now, rate_limit, require_user, retry_transaction
 
 
 router = APIRouter()
-CATEGORIES = ("breakfast", "lunch", "dinner", "dessert", "american", "asian", "indian", "mexican")
+CATEGORIES = MEAL_CLASSIFIERS
 AUTHORED = ("original_text", "quantity", "quantity_max", "unit", "name", "preparation", "optional")
 DERIVED = ("grams", "grams_range", "grams_estimate", "grams_provenance", "grams_input_hash", "grams_error", "grams_confirmed")
 SUMMARY_FIELDS = ("id", "title", "string::slice(description, 0, 300) AS description", "tags", "owner_id", "owner_id.display_name AS author_name")
@@ -33,7 +35,7 @@ def _id(value, table):
 
 
 def _live(recipe):
-    return recipe is not None and not recipe.get("deleted_at") and recipe.get("status") not in {"deleted", "hidden"}
+    return recipe is not None and not recipe.get("deleted_at") and recipe.get("status") == 'published'
 
 
 def _editable(recipe, context):
@@ -41,7 +43,7 @@ def _editable(recipe, context):
 
 
 def _group(recipe):
-    return next((category for category in CATEGORIES if category in recipe["tags"]), "Other")
+    return next((category for category in CATEGORIES if category in {tag_key(tag) for tag in recipe["tags"]}), "Other")
 
 
 def search_terms(query, known_tags):
@@ -56,7 +58,7 @@ def search_terms(query, known_tags):
             if field != "tag":
                 fields.append(field)
             elif value:
-                (tags if value in known_tags else unknown).append(value)
+                (tags if tag_key(value) in {tag_key(tag) for tag in known_tags} else unknown).append(tag_key(value))
         else:
             words.append(token)
     errors = []
@@ -72,7 +74,7 @@ async def _project(repo, fields, condition=None):
     rows, offset = [], 0
     async with Connections.using(repo._name):
         while True:
-            query = RecipeModel.objects().select(*fields).filter(deleted_at=None, status__not_in=["deleted", "hidden"])
+            query = RecipeModel.objects().select(*fields).filter(deleted_at=None, status="published")
             if condition is not None:
                 query.filter(condition)
             page = await query.order_by("id").offset(offset).limit(1000).exec()
@@ -137,29 +139,80 @@ def _revalidate(request, response, result, *, private=False):
     return encoded
 
 
-@router.get("/recipes")
+async def summary_thumbnails(request, items):
+    result = []
+    for item in items:
+        photos = await request.app.state.photos.visible_photos(recipe_id=item['id'])
+        approved = sorted(photo['id'] for photo in photos if photo.get('status') == 'approved')
+        result.append({**item, 'thumbnail_photo_id': approved[0] if approved else None})
+    return result
+
+
+async def filter_summaries(repo, catalog, q, selected_tags, owner_id=None, *, candidates=None, text_match_ids=None):
+    known = {tag_key(tag) for item in catalog for tag in item["tags"]}
+    text, legacy_tags, errors = search_terms(q, known)
+    selected = {tag_key(tag) for tag in selected_tags}
+    unknown = selected - known
+    if unknown:
+        errors.append("Tags not found: " + ", ".join(sorted(unknown)))
+    matches = (text_match_ids if text_match_ids is not None else await _text_matches(repo, text)) if text else None
+    filtered = [item for item in (catalog if candidates is None else candidates)
+                if not unknown and (matches is None or item["id"] in matches)
+                and selected <= {tag_key(tag) for tag in item["tags"]}
+                and (not legacy_tags or set(legacy_tags) & {tag_key(tag) for tag in item["tags"]})
+                and (owner_id is None or item["owner_id"] == _id(owner_id, "users"))]
+    return filtered, errors
+
+
+@router.post("/recipes/lookup", response_model=RecipeLookupResponse)
+async def lookup_recipes(body: RecipeLookupRequest, request: Request):
+    repo = request.app.state.repo
+    ids = list(dict.fromkeys(_id(value, "recipes") for value in body.ids))
+    if not ids:
+        return {"items": [], "unavailable_ids": []}
+    # Bounded candidate retrieval, not a collection scan or stale summary cache.
+    candidates, unavailable, text_matches = [], [], set()
+    text, _, _ = search_terms(body.q, set())
+    for recipe_id in ids:
+        row = await repo.get("recipes", recipe_id)
+        if not row or row.get("status") != "published" or row.get("deleted_at"):
+            unavailable.append(recipe_id)
+            continue
+        if text in " ".join(str(row.get(field, "")) for field in ("title", "description", "directions")).lower():
+            text_matches.add(recipe_id)
+        owner = await repo.get("users", row["owner_id"]) if row.get("owner_id") else None
+        candidates.append({"id": recipe_id, "title": row.get("title", ""),
+                           "description": row.get("description", "")[:300], "tags": row.get("tags", []),
+                           "owner_id": row.get("owner_id"), "author_name": owner["display_name"] if owner else None})
+    catalog = await _catalog(repo) if body.q or body.tags else candidates
+    items, _ = await filter_summaries(repo, catalog, body.q, body.tags, candidates=candidates, text_match_ids=text_matches)
+    return {"items": await summary_thumbnails(request, items), "unavailable_ids": unavailable}
+
+
+@router.get("/recipes", response_model=RecipeListResponse)
 async def list_recipes(request: Request, response: Response, q: str = Query(default="", max_length=2000),
                        owner_id: str | None = Query(default=None, max_length=166, pattern=r"^(users:)?[A-Za-z0-9_-]{1,160}$"),
                        offset: int = Query(default=0, ge=0, le=1_000_000),
-                       limit: int = Query(default=60, ge=1, le=100)):
+                       limit: int = Query(default=60, ge=1, le=100),
+                       tag: list[Tag] = Query(default=[], max_length=50)):
     repo = request.app.state.repo
     catalog = await _catalog(repo)
-    text, tags, errors = search_terms(q, {tag for item in catalog for tag in item["tags"]})
-    matches = await _text_matches(repo, text) if text else None
-    filtered = [item for item in catalog if (matches is None or item["id"] in matches)
-                and (not tags or any(tag in item["tags"] for tag in tags))
-                and (owner_id is None or item["owner_id"] == _id(owner_id, "users"))]
-    items = filtered[offset:offset + limit]
+    filtered, errors = await filter_summaries(repo, catalog, q, tag, owner_id)
+    items = await summary_thumbnails(request, filtered[offset:offset + limit])
     return _revalidate(request, response, {"items": items, "offset": offset, "limit": limit, "total": len(filtered),
             "has_more": offset + limit < len(filtered), "errors": errors,
             "groups": [{"name": name, "items": [item for item in items if _group(item) == name]}
                        for name in (*CATEGORIES, "Other") if any(_group(item) == name for item in items)]})
 
 
-@router.get("/tags")
+@router.get("/tags", response_model=TagCatalog)
 async def list_tags(request: Request, response: Response):
     catalog = await _catalog(request.app.state.repo)
-    return _revalidate(request, response, {"tags": sorted({tag for item in catalog for tag in item["tags"]})})
+    spellings = sorted({tag for item in catalog for tag in item["tags"]}, key=lambda tag: (tag_key(tag), tag))
+    representatives = {}
+    for tag in spellings:
+        representatives.setdefault(tag_key(tag), tag_key(tag) if tag_key(tag) in MEAL_CLASSIFIERS else tag)
+    return _revalidate(request, response, {"tags": list(representatives.values()), "classifier_tags": list(MEAL_CLASSIFIERS)})
 
 
 def _stable_id(seed, kind, index):
@@ -308,7 +361,12 @@ def _content(draft, previous=None):
     normalized = _groups_output(previous_groups, previous["id"]) if previous else []
     old = {view["id"]: (view, stored) for group, original in zip(normalized, previous_groups)
            for view, stored in zip(group["ingredients"], original["ingredients"])}
+    old_groups = {view['id']: stored for view, stored in zip(normalized, previous_groups)}
     for group in data["ingredient_groups"]:
+        previous_group = old_groups.get(group['id'], {})
+        for key, value in previous_group.items():
+            if key not in {'id', 'name', 'title', 'ingredients'}:
+                group.setdefault(key, deepcopy(value))
         group["title"] = group["name"]
         for item in group["ingredients"]:
             item.pop("grams", None)
@@ -316,6 +374,9 @@ def _content(draft, previous=None):
             pair = old.get(item["id"])
             if pair and data["source_text"] == previous.get("source_text", "") and all(item.get(key) == pair[0].get(key) for key in AUTHORED):
                 stored = pair[1]
+                for key, value in stored.items():
+                    if key not in {'id', 'text', *AUTHORED} and not key.startswith('grams'):
+                        item.setdefault(key, deepcopy(value))
                 if stored.get("grams_input_hash") == ingredient_hash(stored):
                     item.update({key: deepcopy(stored[key]) for key in DERIVED if key in stored})
     data["instructions"] = data["directions"]
@@ -413,12 +474,49 @@ async def delete_recipe(request: Request, recipe_id: str, expected_revision: int
     return Response(status_code=204)
 
 
-@router.post("/parse")
+async def organization_context(request, tx):
+    from .security import DEVICE_COOKIE, digest, resolve_context
+    context = await resolve_context(request, tx)
+    secret = request.cookies.get(DEVICE_COOKIE, "")
+    if secret and len(secret) <= 128:
+        rows = await tx.list("devices", {"secret_hash": digest(secret)}, limit=2)
+        for device in rows:
+            user = await tx.get("users", device["user_id"])
+            if device.get("revoked_at") or not user or user.get("state") == "blocked":
+                raise HTTPException(403, "Credential is unavailable")
+            # A merged chain may lead to a blocked survivor, even for an expired device.
+            seen = set()
+            while user and user.get("merged_into") and user["id"] not in seen:
+                seen.add(user["id"])
+                user = await tx.get("users", user["merged_into"])
+                if not user or user.get("state") == "blocked":
+                    raise HTTPException(403, "Credential is unavailable")
+    if context.user:
+        return await authorize(request, tx)
+    return context
+
+
+@router.post("/ingredients/parse", response_model=IngredientLinesResult)
+async def parse_lines(request: Request, body: IngredientLinesRequest):
+    from .ingredient_lines import parse_ingredient_lines
+    await organization_context(request, request.app.state.repo)
+
+    async def reserve():
+        async def charge(tx):
+            context = await organization_context(request, tx)
+            await ai.consume_ai_quota(tx, request.app.state.settings,
+                                     user_id=context.user["id"] if context.user else None,
+                                     ip=client_ip(request), units=1)
+        await retry_transaction(request.app.state.repo, charge)
+
+    return await parse_ingredient_lines(body.lines, request.app.state.settings, reserve_fallback=reserve)
+
+
+@router.post("/parse", response_model=ParseResult)
 async def parse(request: Request, body: ParseRequest):
-    await require_user(request)
     async def reserve(tx):
-        context = await authorize(request, tx)
-        await ai.consume_ai_quota(tx, request.app.state.settings, user_id=context.user["id"], ip=client_ip(request))
+        context = await organization_context(request, tx)
+        await ai.consume_ai_quota(tx, request.app.state.settings, user_id=context.user["id"] if context.user else None, ip=client_ip(request))
     await retry_transaction(request.app.state.repo, reserve)
     try:
         result = await ai.parse_recipe(body.source_text, request.app.state.settings)

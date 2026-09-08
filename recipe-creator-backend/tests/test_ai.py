@@ -61,6 +61,36 @@ def test_lossless_unicode_and_whitespace():
     assert data["warnings"] == ["unclassified_source"]
 
 
+async def test_ingredient_batch_one_request_no_transport_retries(monkeypatch):
+    import openai
+    from recipe_creator import ai
+    from pydantic_ai.exceptions import UnexpectedModelBehavior
+    original = openai.AsyncOpenAI
+    retries = []
+    def client(*args, **kwargs):
+        retries.append(kwargs['max_retries'])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(openai, 'AsyncOpenAI', client)
+    lines = [{'id': 'legacy', 'text': '2 cans tomatoes'}]
+    calls = []
+    async def respond(messages, info):
+        payload = json.loads(next(p.content for m in messages for p in m.parts if isinstance(p, UserPromptPart)))
+        assert payload == lines
+        calls.append(1)
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'items': [{'id': 'legacy', 'unparsed': True}]})])
+    with ai.ingredient_line_agent.override(model=FunctionModel(respond)):
+        result = await ai.parse_ingredient_lines_batch(lines, Settings())
+    assert result.items[0].unparsed and calls == [1] and retries == [0]
+    calls.clear()
+    async def invalid(messages, info):
+        calls.append(1)
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'not_items': 'repair me'})])
+    with ai.ingredient_line_agent.override(model=FunctionModel(invalid)):
+        with pytest.raises(UnexpectedModelBehavior):
+            await ai.parse_ingredient_lines_batch(lines, Settings())
+    assert calls == [1]
+
+
 async def test_tool_output_without_network():
     source = "250 g flour"
     with parser_agent.override(model=TestModel(custom_output_args=output(source, ingredient_groups=[{

@@ -6,6 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .schemas import SessionResponse
 from .security import (
     ADMIN_COOKIE, CHALLENGE_COOKIE, CSRF_COOKIE, DEVICE_COOKIE, active, all_rows,
     authorize, canonical_user, clear_cookie, csrf_token, digest, get_context, now, public_user,
@@ -83,7 +84,7 @@ def pairing_output(pairing, user, existing=False):
             "has_existing_profile": existing}
 
 
-@router.get("/session")
+@router.get("/session", response_model=SessionResponse)
 async def session(request: Request, response: Response):
     settings = request.app.state.settings
     context = await get_context(request)
@@ -137,7 +138,10 @@ async def update_identity(body: ProfileInput, request: Request):
         context = await authorize(request, tx)
         return await tx.update("users", context.user["id"], {"display_name": body.display_name})
 
-    return {"user": public_user(await retry_transaction(request.app.state.repo, update))}
+    result = await retry_transaction(request.app.state.repo, update)
+    from .recipes import invalidate_catalog
+    invalidate_catalog(request.app.state.repo)
+    return {"user": public_user(result)}
 
 
 @router.get("/devices")

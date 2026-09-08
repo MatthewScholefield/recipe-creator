@@ -2,7 +2,6 @@
 import argparse
 import asyncio
 from datetime import UTC, datetime
-import getpass
 import hashlib
 from importlib import metadata
 import json
@@ -262,8 +261,71 @@ def restore(settings: Settings, archive: Path, *, quiesced=False, trusted=False,
     return manifest
 
 
+async def recent_admin_users(repo, *, limit=20, q=""):
+    from .security import all_rows
+    if not 1 <= limit <= 500 or len(q) > 100:
+        raise ValueError("Use limit 1–500 and search up to 100 characters")
+    devices = await all_rows(repo, "devices")
+    result = []
+    for user in await all_rows(repo, "users"):
+        if user["state"] != "active" or user.get("merged_into"):
+            continue
+        if q.casefold() not in user["display_name"].casefold() and q.casefold() not in user["id"].casefold():
+            continue
+        timestamps = [str(device["last_used_at"]) for device in devices
+                      if device["user_id"] == user["id"] and device.get("last_used_at")]
+        last_seen = max(timestamps, default=str(user["created_at"]))
+        result.append({"id": user["id"], "display_name": user["display_name"],
+                       "last_seen": last_seen, "is_admin": user.get("is_admin", False)})
+    result.sort(key=lambda user: user["id"])
+    result.sort(key=lambda user: datetime.fromisoformat(user["last_seen"].replace("Z", "+00:00")), reverse=True)
+    return result[:limit]
+
+
+async def admin_command(repo, args):
+    from .security import record_id
+    if args.command == "admin-users":
+        return {"users": await recent_admin_users(repo, limit=args.limit, q=args.q)}
+    if not sys.stdin.isatty() and not (args.user_id and args.yes):
+        raise ValueError("Noninteractive use requires --user-id and --yes")
+    user_id = args.user_id
+    if not user_id:
+        users = await recent_admin_users(repo)
+        if not users:
+            raise ValueError("No eligible profiles")
+        for index, user in enumerate(users, 1):
+            print(f"{index}. {user['display_name']} [{user['id']}]")
+        selection = input("Select profile number: ")
+        if not selection.isdecimal() or not 1 <= int(selection) <= len(users):
+            raise ValueError("Invalid selection")
+        user_id = users[int(selection) - 1]["id"]
+    try:
+        user_id = record_id(user_id, "users")
+    except Exception:
+        raise ValueError("Invalid user ID") from None
+    user = await repo.get("users", user_id)
+    if not user or user["state"] != "active" or user.get("merged_into"):
+        raise ValueError("Select an active, unmerged profile")
+    if not args.yes or not args.user_id:
+        confirmation = input(f"Confirm {args.command} for {user['display_name']} [{user_id}] by typing the user ID: ")
+        if confirmation != user_id:
+            raise ValueError("Confirmation did not match")
+    async with repo.transaction() as tx:
+        current = await tx.get("users", user_id)
+        if not current or current["state"] != "active" or current.get("merged_into"):
+            raise ValueError("Profile is no longer eligible")
+        granted = args.command == "admin-grant"
+        await tx.update("users", user_id, {"is_admin": granted})
+        await tx.create("audit", {"actor_id": None, "action": "user.admin.grant" if granted else "user.admin.revoke",
+                                  "target": user_id, "operator": "cli", "previous_is_admin": current.get("is_admin", False),
+                                  "is_admin": granted})
+    return {"id": user_id, "display_name": current["display_name"], "is_admin": granted}
+
+
 async def _database_command(args, settings):
     async with Repository(settings) as repo:
+        if args.command.startswith("admin-"):
+            return await admin_command(repo, args)
         if args.command == "migrate":
             return {"migrations": await repo.migrate()}
         if args.command == "import":
@@ -299,7 +361,13 @@ def parser():
                                  help="I trust this SQL archive; checksums are not authentication. "
                                       "Set a NEW database name and absent media path in .env")
     commands.add_parser("cleanup", help="Reconcile photo retention, interrupted uploads and orphan media")
-    commands.add_parser("hash-password", help="Prompt twice for an admin password and print its Argon2id hash")
+    recent = commands.add_parser("admin-users", help="List recent active profiles (no credentials)")
+    recent.add_argument("--limit", type=int, default=20)
+    recent.add_argument("--q", default="")
+    for name in ("admin-grant", "admin-revoke"):
+        command = commands.add_parser(name, help="Explicitly change user admin permission")
+        command.add_argument("--user-id", required=name == "admin-revoke")
+        command.add_argument("--yes", action="store_true")
     commands.add_parser("export-openapi", help="Print OpenAPI JSON without connecting to DB or starting workers")
     return result
 
@@ -307,19 +375,6 @@ def parser():
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
-        if args.command == "hash-password":
-            from argon2 import PasswordHasher
-            password = getpass.getpass("Admin password: ")
-            if len(password) < 12:
-                raise ValueError("Use at least 12 characters")
-            if getpass.getpass("Confirm password: ") != password:
-                raise ValueError("Passwords do not match")
-            password_hash = PasswordHasher().hash(password)
-            print("Password hash generated successfully.")
-            print("Add this line to the root .env file:")
-            print(f"RECIPE_ADMIN_PASSWORD_HASH={password_hash}")
-            print("Restart the API after updating .env.")
-            return 0
         if args.command == "export-openapi":
             from .app import create_app
             print(json.dumps(create_app().openapi(), indent=2))

@@ -158,6 +158,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recipes/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Lookup Recipes */
+        post: operations["lookup_recipes_api_recipes_lookup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/recipes": {
         parameters: {
             query?: never;
@@ -212,6 +229,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ingredients/parse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Parse Lines */
+        post: operations["parse_lines_api_ingredients_parse_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/parse": {
         parameters: {
             query?: never;
@@ -240,40 +274,6 @@ export interface paths {
         put?: never;
         /** Enrich Recipe */
         post: operations["enrich_recipe_api_recipes__recipe_id__enrich_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/login": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Login */
-        post: operations["login_api_admin_login_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/logout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Logout */
-        post: operations["logout_api_admin_logout_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -468,6 +468,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/site-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Settings */
+        get: operations["get_settings_api_site_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/site-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Settings */
+        put: operations["update_settings_api_admin_site_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health/live": {
         parameters: {
             query?: never;
@@ -574,6 +608,21 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AdminUsersResponse */
+        AdminUsersResponse: {
+            /** Users */
+            users: components["schemas"]["PublicUser"][];
+            /** Items */
+            items: components["schemas"]["PublicUser"][];
+            /** Total */
+            total: number;
+            /** Start */
+            start: number;
+            /** Limit */
+            limit: number;
+            /** Has More */
+            has_more: boolean;
+        };
         /** Body_upload_photo_api_recipes__recipe_id__photos_post */
         Body_upload_photo_api_recipes__recipe_id__photos_post: {
             /** File */
@@ -675,6 +724,38 @@ export interface components {
             /** Ingredients */
             ingredients: components["schemas"]["IngredientOutput"][];
         };
+        /** IngredientLineInput */
+        IngredientLineInput: {
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+        };
+        /** IngredientLineResult */
+        IngredientLineResult: {
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+            /**
+             * Method
+             * @enum {string}
+             */
+            method: "deterministic" | "llm" | "unparsed";
+            ingredient: components["schemas"]["IngredientOutput"];
+        };
+        /** IngredientLinesRequest */
+        IngredientLinesRequest: {
+            /** Lines */
+            lines: components["schemas"]["IngredientLineInput"][];
+        };
+        /** IngredientLinesResult */
+        IngredientLinesResult: {
+            /** Items */
+            items: components["schemas"]["IngredientLineResult"][];
+            /** Warnings */
+            warnings: string[];
+        };
         /** IngredientOutput */
         IngredientOutput: {
             /** Id */
@@ -707,11 +788,6 @@ export interface components {
             optional: boolean;
             grams?: components["schemas"]["GramEstimate"] | null;
         };
-        /** LoginInput */
-        LoginInput: {
-            /** Password */
-            password: string;
-        };
         /** MergeInput */
         MergeInput: {
             /** Source Id */
@@ -743,6 +819,19 @@ export interface components {
         OwnerInput: {
             /** Owner Id */
             owner_id: string | null;
+            /** Expected Revision */
+            expected_revision: number;
+        };
+        /** OwnerResult */
+        OwnerResult: {
+            /** Id */
+            id: string;
+            /** Owner Id */
+            owner_id: string | null;
+            /** Author Name */
+            author_name: string | null;
+            /** Revision */
+            revision: number;
         };
         /** PairingInput */
         PairingInput: {
@@ -756,10 +845,42 @@ export interface components {
             /** Source Text */
             source_text: string;
         };
+        /** ParseResult */
+        ParseResult: {
+            /** Source Hash */
+            source_hash: string;
+            /** Source Text */
+            source_text: string;
+            /** Description */
+            description: string;
+            /** Ingredient Groups */
+            ingredient_groups: components["schemas"]["IngredientGroupOutput"][];
+            /** Directions */
+            directions: string;
+            /** Notes */
+            notes: string;
+            /** Unclassified */
+            unclassified: string;
+            /** Warnings */
+            warnings: string[];
+        };
         /** ProfileInput */
         ProfileInput: {
             /** Display Name */
             display_name: string;
+        };
+        /** PublicUser */
+        PublicUser: {
+            /** Id */
+            id: string;
+            /** Display Name */
+            display_name: string;
+            /** State */
+            state: string;
+            /** Photo Trusted */
+            photo_trusted: boolean;
+            /** Merged Into */
+            merged_into?: string | null;
         };
         /** Recipe */
         Recipe: {
@@ -869,6 +990,66 @@ export interface components {
              */
             modifications: string;
         };
+        /** RecipeListResponse */
+        RecipeListResponse: {
+            /** Items */
+            items: components["schemas"]["RecipeSummary"][];
+            /** Offset */
+            offset: number;
+            /** Limit */
+            limit: number;
+            /** Total */
+            total: number;
+            /** Has More */
+            has_more: boolean;
+            /** Errors */
+            errors: string[];
+            /** Groups */
+            groups: components["schemas"]["RecipeSummaryGroup"][];
+        };
+        /** RecipeLookupRequest */
+        RecipeLookupRequest: {
+            /** Ids */
+            ids: string[];
+            /**
+             * Q
+             * @default
+             */
+            q: string;
+            /** Tags */
+            tags?: string[];
+        };
+        /** RecipeLookupResponse */
+        RecipeLookupResponse: {
+            /** Items */
+            items: components["schemas"]["RecipeSummary"][];
+            /** Unavailable Ids */
+            unavailable_ids: string[];
+        };
+        /** RecipeSummary */
+        RecipeSummary: {
+            /** Thumbnail Photo Id */
+            thumbnail_photo_id?: string | null;
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Tags */
+            tags: string[];
+            /** Owner Id */
+            owner_id: string | null;
+            /** Author Name */
+            author_name: string | null;
+        };
+        /** RecipeSummaryGroup */
+        RecipeSummaryGroup: {
+            /** Name */
+            name: string;
+            /** Items */
+            items: components["schemas"]["RecipeSummary"][];
+        };
         /** RecipeUpdate */
         RecipeUpdate: {
             /** Title */
@@ -935,6 +1116,48 @@ export interface components {
             /** Expected Revision */
             expected_revision: number;
         };
+        /** SessionResponse */
+        SessionResponse: {
+            user: components["schemas"]["PublicUser"] | null;
+            /** Device Id */
+            device_id: string | null;
+            /** Admin */
+            admin: boolean;
+            /** Csrf Token */
+            csrf_token: string;
+        };
+        /** SiteCopy */
+        SiteCopy: {
+            /** Site Title */
+            site_title: string;
+            /** Site Tagline */
+            site_tagline: string;
+            /** Home Title */
+            home_title: string;
+            /** Home Intro */
+            home_intro: string;
+            /** Footer Text */
+            footer_text: string;
+        };
+        /** SiteSettings */
+        SiteSettings: {
+            /** Revision */
+            revision: number;
+            copy: components["schemas"]["SiteCopy"];
+        };
+        /** SiteSettingsUpdate */
+        SiteSettingsUpdate: {
+            /** Expected Revision */
+            expected_revision: number;
+            copy: components["schemas"]["SiteCopy"];
+        };
+        /** TagCatalog */
+        TagCatalog: {
+            /** Tags */
+            tags: string[];
+            /** Classifier Tags */
+            classifier_tags: string[];
+        };
         /** UserInput */
         UserInput: {
             /** Photo Trusted */
@@ -979,7 +1202,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SessionResponse"];
                 };
             };
         };
@@ -1251,6 +1474,39 @@ export interface operations {
             };
         };
     };
+    lookup_recipes_api_recipes_lookup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipeLookupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeLookupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_recipes_api_recipes_get: {
         parameters: {
             query?: {
@@ -1258,6 +1514,7 @@ export interface operations {
                 owner_id?: string | null;
                 offset?: number;
                 limit?: number;
+                tag?: string[];
             };
             header?: never;
             path?: never;
@@ -1271,7 +1528,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["RecipeListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1335,7 +1592,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TagCatalog"];
                 };
             };
         };
@@ -1437,6 +1694,39 @@ export interface operations {
             };
         };
     };
+    parse_lines_api_ingredients_parse_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IngredientLinesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngredientLinesResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     parse_api_parse_post: {
         parameters: {
             query?: never;
@@ -1456,7 +1746,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ParseResult"];
                 };
             };
             /** @description Validation Error */
@@ -1501,65 +1791,13 @@ export interface operations {
             };
         };
     };
-    login_api_admin_login_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LoginInput"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    logout_api_admin_logout_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
     users_api_admin_users_get: {
         parameters: {
             query?: {
                 q?: string;
                 start?: number;
                 limit?: number;
+                eligible_owner?: boolean;
             };
             header?: never;
             path?: never;
@@ -1573,7 +1811,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminUsersResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1643,7 +1881,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["OwnerResult"];
                 };
             };
             /** @description Validation Error */
@@ -1930,6 +2168,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_settings_api_site_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteSettings"];
+                };
+            };
+        };
+    };
+    update_settings_api_admin_site_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteSettings"];
                 };
             };
             /** @description Validation Error */

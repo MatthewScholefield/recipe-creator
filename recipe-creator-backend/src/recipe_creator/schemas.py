@@ -7,6 +7,35 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .ingredients import parse_quantity
 
 
+MEAL_CLASSIFIERS = ('breakfast', 'lunch', 'dinner', 'dessert')
+
+
+def tag_key(value: str) -> str:
+    import unicodedata
+    return unicodedata.normalize('NFC', value.strip()).casefold()
+
+
+def validate_classifiers(tags):
+    if len({tag_key(tag) for tag in tags} & set(MEAL_CLASSIFIERS)) > 1:
+        raise ValueError('Choose only one meal type: breakfast, lunch, dinner or dessert.')
+    return tags
+
+
+def normalize_tags(tags):
+    import unicodedata
+    if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+        raise ValueError('Tags must be a list of strings')
+    result, seen = [], set()
+    for tag in tags:
+        key = tag_key(tag)
+        if not key:
+            raise ValueError('Tags must not be blank')
+        if key not in seen:
+            result.append(key if key in MEAL_CLASSIFIERS else unicodedata.normalize('NFC', tag.strip()))
+            seen.add(key)
+    return validate_classifiers(result)
+
+
 ShortText = Annotated[str, Field(max_length=500)]
 Prose = Annotated[str, Field(max_length=100_000)]
 Identifier = Annotated[str, Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")]
@@ -80,6 +109,11 @@ class RecipeDraft(StrictDTO):
             readonly = {"owner_id", "author_name", "can_edit", "photo_trust", "photo_trusted", "admin", "trusted"}
             return {key: item for key, item in value.items() if key not in readonly}
         return value
+
+    @field_validator('tags', mode='before')
+    @classmethod
+    def clean_tags(cls, value):
+        return normalize_tags(value)
 
     @field_validator("title")
     @classmethod
@@ -178,6 +212,159 @@ class Recipe(BaseModel):
     yield_unit: str
     source_url: str
     modifications: str
+
+
+class PublicUser(BaseModel):
+    id: str
+    display_name: str
+    state: str
+    photo_trusted: bool
+    merged_into: str | None = None
+
+
+class SessionResponse(BaseModel):
+    user: PublicUser | None
+    device_id: str | None
+    admin: bool
+    csrf_token: str
+
+
+class AdminUsersResponse(BaseModel):
+    users: list[PublicUser]
+    items: list[PublicUser]
+    total: int
+    start: int
+    limit: int
+    has_more: bool
+
+
+class OwnerResult(BaseModel):
+    id: str
+    owner_id: str | None
+    author_name: str | None
+    revision: int
+
+
+class SiteCopy(StrictDTO):
+    site_title: str = Field(max_length=80)
+    site_tagline: str = Field(max_length=160)
+    home_title: str = Field(max_length=120)
+    home_intro: str = Field(max_length=300)
+    footer_text: str = Field(max_length=200)
+
+    @field_validator('*')
+    @classmethod
+    def printable(cls, value, info):
+        import unicodedata
+        if any(unicodedata.category(ch).startswith('C') and ch not in '\t\n\r' for ch in value):
+            raise ValueError('Use printable text')
+        if info.field_name in {'site_title', 'home_title'} and not value.strip():
+            raise ValueError('Title is required')
+        return value
+
+
+DEFAULT_SITE_COPY = dict(site_title='Recipes', site_tagline='Share your food.', home_title='Recipes', home_intro='', footer_text='')
+
+
+class SiteSettings(BaseModel):
+    revision: int
+    copy: SiteCopy
+
+
+class SiteSettingsUpdate(StrictDTO):
+    expected_revision: int = Field(ge=0)
+    copy: SiteCopy
+
+
+class RecipeSummary(BaseModel):
+    thumbnail_photo_id: str | None = None
+    id: str
+    title: str
+    description: str
+    tags: list[str]
+    owner_id: str | None
+    author_name: str | None
+
+
+class RecipeSummaryGroup(BaseModel):
+    name: str
+    items: list[RecipeSummary]
+
+
+class RecipeListResponse(BaseModel):
+    items: list[RecipeSummary]
+    offset: int
+    limit: int
+    total: int
+    has_more: bool
+    errors: list[str]
+    groups: list[RecipeSummaryGroup]
+
+
+class TagCatalog(BaseModel):
+    tags: list[str]
+    classifier_tags: list[str]
+
+
+Tag = Annotated[str, Field(min_length=1, max_length=80)]
+
+
+class RecipeLookupRequest(StrictDTO):
+    ids: list[Annotated[str, Field(pattern=r'^(recipes:)?[A-Za-z0-9_-]{1,160}$')]] = Field(max_length=100)
+    q: str = Field(default='', max_length=2000)
+    tags: list[Tag] = Field(default_factory=list, max_length=50)
+
+
+class RecipeLookupResponse(BaseModel):
+    items: list[RecipeSummary]
+    unavailable_ids: list[str]
+
+
+class IngredientLineInput(StrictDTO):
+    id: Identifier
+    text: str = Field(min_length=1, max_length=10_000)
+
+    @field_validator('text')
+    @classmethod
+    def nonblank(cls, value):
+        if not value.strip():
+            raise ValueError('Ingredient text is required')
+        return value
+
+
+class IngredientLinesRequest(StrictDTO):
+    lines: list[IngredientLineInput] = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode='after')
+    def bounded_unique(self):
+        if len({row.id for row in self.lines}) != len(self.lines):
+            raise ValueError('Ingredient IDs must be unique')
+        if sum(len(row.text) for row in self.lines) > 100_000:
+            raise ValueError('Ingredient text is too large')
+        return self
+
+
+class IngredientLineResult(BaseModel):
+    id: str
+    text: str
+    method: Literal['deterministic', 'llm', 'unparsed']
+    ingredient: IngredientOutput
+
+
+class IngredientLinesResult(BaseModel):
+    items: list[IngredientLineResult]
+    warnings: list[str]
+
+
+class ParseResult(BaseModel):
+    source_hash: str
+    source_text: str
+    description: str
+    ingredient_groups: list[IngredientGroupOutput]
+    directions: str
+    notes: str
+    unclassified: str
+    warnings: list[str]
 
 
 class ParseRequest(StrictDTO):

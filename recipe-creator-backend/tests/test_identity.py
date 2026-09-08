@@ -100,6 +100,39 @@ async def test_session_no_identity_csrf_origin_and_body_limits(identity_app):
 
 
 @pytest.mark.integration
+async def test_anonymous_transform_and_lookup_security(identity_app, monkeypatch):
+    from recipe_creator import recipes, ai
+    identity_app.include_router(recipes.router)
+    async def organized(source, settings):
+        return {'source_hash': ai.source_hash(source), 'description': source, 'directions': '', 'notes': '',
+                'unclassified': '', 'ingredient_groups': [], 'warnings': []}
+    monkeypatch.setattr(ai, 'parse_recipe', organized)
+    async with client(identity_app) as browser:
+        endpoints = [('/parse', {'source_text': 'Exact source'}),
+                     ('/ingredients/parse', {'lines': [{'id': 'old', 'text': '2 eggs'}]}),
+                     ('/recipes/lookup', {'ids': []})]
+        for path, body in endpoints:
+            assert (await browser.post(path, json=body)).status_code == 403
+        await csrf(browser)
+        for path, body in endpoints:
+            response = await browser.post(path, json=body)
+            assert response.status_code == 200, response.text
+            assert response.headers['cache-control'] == 'no-store'
+            assert (await browser.post(path, json=body, headers={'Origin': 'https://evil.example'})).status_code == 403
+            assert (await browser.post(path, json=body, headers={'X-CSRF-Token': 'invalid'})).status_code == 403
+            assert (await browser.post(path, content=b'x' * (150 * 1024 + 1))).status_code == 413
+        assert not await identity_app.state.repo.list('users')
+        assert not await identity_app.state.repo.list('devices')
+        assert (await browser.post('/recipes', json={'title': 'Needs profile'})).status_code == 401
+        user = await profile(browser)
+        await identity_app.state.repo.update('devices', user['device_id'], {'expires_at': now() - timedelta(seconds=1)})
+        assert (await browser.post('/parse', json={'source_text': 'expired anonymous'})).status_code == 200
+        await identity_app.state.repo.update('devices', user['device_id'], {'revoked_at': now()})
+        for path, body in endpoints[:2]:
+            assert (await browser.post(path, json=body)).status_code == 403
+
+
+@pytest.mark.integration
 async def test_identity_hashes_updates_revocation_and_expiry(identity_app):
     repo = identity_app.state.repo
     async with client(identity_app) as browser:
@@ -146,12 +179,12 @@ async def test_pairing_challenge_approval_single_use_preserves_profiles(identity
         owner = await profile(source, "Owner")
         previous = await profile(destination, "Previous")
         recipe = await repo.create("recipes", {"owner_id": previous["user"]["id"], "title": "Keep me"})
-        assert (await source.post("/admin/login", json={"password": "test-password"})).status_code == 200
-        assert (await destination.post("/admin/login", json={"password": "test-password"})).status_code == 200
-        admin_secret = destination.cookies[ADMIN_COOKIE]
+        await repo.update("users", owner["user"]["id"], {"is_admin": True})
+        admin_secret = "obsolete-cookie"
+        destination.cookies.set(ADMIN_COOKIE, admin_secret)
         pairing, requested = await connect(source, destination)
         assert requested["has_existing_profile"] and requested["display_name"] == "Owner"
-        assert (await destination.get("/session")).json()["admin"]
+        assert not (await destination.get("/session")).json()["admin"]
         assert (await destination.get("/session")).json()["user"]["id"] == previous["user"]["id"]
         await csrf(stranger)
         path = "/pairings/" + pairing["id"]
@@ -164,13 +197,12 @@ async def test_pairing_challenge_approval_single_use_preserves_profiles(identity
         results = await asyncio.gather(*(destination.post(path + "/complete", json={"switch_profile": True}) for _ in range(2)))
         assert sorted(result.status_code for result in results) == [200, 404]
         session = (await destination.get("/session")).json()
-        assert session["user"]["id"] == owner["user"]["id"] and not session["admin"]
+        assert session["user"]["id"] == owner["user"]["id"] and session["admin"]
         assert session["device_id"] != owner["device_id"]
         assert source.cookies[DEVICE_COOKIE] != destination.cookies[DEVICE_COOKIE]
-        assert ADMIN_COOKIE not in destination.cookies
+        assert not await repo.list('admin_sessions')
         assert (await source.get("/session")).json()["admin"]
-        admin_session = (await repo.list("admin_sessions", {"secret_hash": digest(admin_secret)}))[0]
-        assert admin_session["revoked_at"]
+        assert not await repo.list("admin_sessions")
         async with client(identity_app) as replay:
             replay.cookies.set(ADMIN_COOKIE, admin_secret)
             assert (await replay.get("/admin/users")).status_code == 401

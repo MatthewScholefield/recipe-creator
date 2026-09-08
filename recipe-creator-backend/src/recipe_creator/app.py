@@ -70,6 +70,8 @@ def create_app(settings: Settings | None = None, repo=None, run_jobs=True):
     app.include_router(identity.router, prefix="/api")
     app.include_router(recipes.router, prefix="/api")
     app.include_router(admin.router, prefix="/api")
+    from .site_settings import router as site_settings_router
+    app.include_router(site_settings_router, prefix="/api")
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request, exc):
@@ -164,7 +166,11 @@ def create_app(settings: Settings | None = None, repo=None, run_jobs=True):
         context = await get_context(request)
         if not context.user and not context.admin:
             raise HTTPException(401, "Profile required")
-        await request.app.state.photos.remove(photo_id, context.user["id"] if context.user else None, context.admin)
+        from .security import authorize
+        async def authorize_actor(tx):
+            await authorize(request, tx, admin=context.admin)
+        await request.app.state.photos.remove(photo_id, context.user["id"] if context.user else None,
+                                               context.admin, authorize_actor=authorize_actor)
         return Response(status_code=204)
 
     @app.get("/{path:path}", include_in_schema=False)

@@ -437,8 +437,10 @@ class PhotoService:
                 raise _error(404, "Image not found")
             return path, photo["status"] == "approved"
 
-    async def _mark_deleting(self, photo_id, target, token=None, user_id=None, admin=False, stale=False):
+    async def _mark_deleting(self, photo_id, target, token=None, user_id=None, admin=False, stale=False, authorize_actor=None):
         async def mark(tx):
+            if authorize_actor is not None:
+                await authorize_actor(tx)
             photo = await tx.get("photos", photo_id)
             if not photo:
                 raise _error(404, "Photo not found")
@@ -492,12 +494,12 @@ class PhotoService:
                                                     "reserved_bytes": 0, "lease_until": None})
         await self._retry(release)
 
-    async def remove(self, photo_id, user_id, admin=False):
+    async def remove(self, photo_id, user_id, admin=False, *, authorize_actor=None):
         photo_id = _id(photo_id, "photos")
         user_id = _id(user_id, "users") if user_id is not None else None
         if user_id is None and not admin:
             raise _error(401, "Authentication required")
-        await self._mark_deleting(photo_id, "deleted", user_id=user_id, admin=admin)
+        await self._mark_deleting(photo_id, "deleted", user_id=user_id, admin=admin, authorize_actor=authorize_actor)
         await self._purge(photo_id)
 
     async def moderate(self, photo_id, state, actor_id=None):

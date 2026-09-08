@@ -160,18 +160,13 @@ def test_cli_credentials_not_in_argv_or_errors(settings, tmp_path, monkeypatch):
         cli._surreal(settings, "surreal", "export", tmp_path / "database.surql")
 
 
-def test_hash_password_and_cli_commands(monkeypatch, capsys):
-    from argon2 import PasswordHasher
-    monkeypatch.setattr(cli.getpass, "getpass", lambda _: "long test password")
-    assert cli.main(["hash-password"]) == 0
-    output = capsys.readouterr().out
-    line = next(line for line in output.splitlines() if line.startswith("RECIPE_ADMIN_PASSWORD_HASH="))
-    encoded = line.split("=", 1)[1]
-    assert "Add this line to the root .env file:" in output
-    assert "Restart the API after updating .env." in output
-    assert PasswordHasher().verify(encoded, "long test password")
-    for command in ("migrate", "cleanup", "export-openapi"):
+def test_user_admin_and_cli_commands():
+    with pytest.raises(SystemExit):
+        cli.parser().parse_args(['hash-password'])
+    for command in ('migrate', 'cleanup', 'export-openapi', 'admin-users', 'admin-grant'):
         assert cli.parser().parse_args([command]).command == command
+    args = cli.parser().parse_args(['admin-revoke', '--user-id', 'verified-user', '--yes'])
+    assert args.user_id == 'verified-user' and args.yes
 
 
 def test_failed_import_does_not_install_media(tmp_path, settings, fake_export, monkeypatch):

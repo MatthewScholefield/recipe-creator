@@ -20,7 +20,7 @@ from recipe_creator.settings import Settings
 
 
 def test_model_registry_and_nested_validation():
-    assert set(MODELS) == {"users", "devices", "pairings", "admin_sessions", "recipes", "revisions", "photos", "jobs", "audit", "usage"}
+    assert set(MODELS) == {"users", "devices", "pairings", "admin_sessions", "recipes", "revisions", "photos", "jobs", "audit", "usage", "site_settings"}
     with pytest.raises(ValidationError):
         Recipe(ingredient_groups=[{"ingredients": [{"grams": -1}]}])
 
@@ -70,7 +70,9 @@ async def test_nested_roundtrip_schema_and_references(repo):
 @pytest.mark.integration
 async def test_all_tables_and_dedupe(repo):
     for table in MODELS:
-        row = await repo.create(table, {"service_nested": {"null": None, "values": [None, {"ok": True}]}})
+        from recipe_creator.schemas import DEFAULT_SITE_COPY
+        data = {'copy': DEFAULT_SITE_COPY} if table == 'site_settings' else {}
+        row = await repo.create(table, {**data, "service_nested": {"null": None, "values": [None, {"ok": True}]}})
         assert (await repo.get(table, row["id"]))["service_nested"] == {"null": None, "values": [None, {"ok": True}]}
     with pytest.raises(NotFoundError):
         await repo.create("devices", {"user_id": "missing"})
@@ -156,6 +158,34 @@ async def test_concurrent_revision_history_and_counter(repo):
         pytest.fail("Counter exceeded retry budget")
     await asyncio.gather(*(increment() for _ in range(6)))
     assert (await repo.get("usage", bucket["id"]))["count"] == 6
+
+
+@pytest.mark.integration
+async def test_security_cutover_from_existing_database(repo):
+    # A separate empty database starts at 0001, containing pre-cutover records.
+    settings = repo.settings.model_copy(update={'db_database': 'cutover_' + uuid4().hex})
+    async with Repository(settings) as old:
+        await old.connect()
+        await old._connection.query(f'DEFINE DATABASE `{settings.db_database}`;')
+        executor = _MigrationExecutor(settings.migrations_dir)
+        try:
+            async with Connections.using(old._name):
+                await executor.migrate(target='0001_initial', schema_only=False)
+            await old._connection.query("CREATE users:legacy CONTENT {display_name: 'Legacy', state: 'active', photo_trust: true, created_at: time::now(), updated_at: time::now(), payload: {is_admin: true}};")
+            await old._connection.query("CREATE admin_sessions:legacy CONTENT {secret_hash: 'historical', expires_at: time::now() + 1d, created_at: time::now(), updated_at: time::now(), payload: {}};")
+            recipe = await old.create('recipes', {'title': 'Original', 'source_text': ' Exact\\r\\nprose ', 'tags': ['Dinner', 'Breakfast', 'Cafe\u0301'], 'owner_id': 'legacy'})
+            before = await old.get('recipes', recipe['id'])
+            assert await old.migrate() == ['0002_user_admin_site_settings']
+            user = await old.get('users', 'legacy')
+            assert user['is_admin'] is False and user['photo_trust'] is True
+            assert (await old.get('admin_sessions', 'legacy'))['revoked_at']
+            assert await old.get('recipes', recipe['id']) == before
+            assert not await old.list('site_settings')
+            await old.update('users', 'legacy', {'is_admin': True})
+            assert await old.migrate() == []
+            assert (await old.get('users', 'legacy'))['is_admin']
+        finally:
+            await old._connection.query(f'REMOVE DATABASE `{settings.db_database}`;')
 
 
 @pytest.mark.integration

@@ -1,30 +1,23 @@
-import asyncio
 from datetime import datetime, timedelta
-import secrets
 from typing import Literal
 
-from argon2 import PasswordHasher, Type
-from argon2.exceptions import InvalidHashError, VerificationError
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .identity import invalidate_pairings
+from .schemas import AdminUsersResponse, OwnerResult, validate_classifiers
+from .recipes import _save_revision, invalidate_catalog
+from .jobs import enqueue_enrichment
 from .security import (
-    ADMIN_COOKIE, all_rows, authorize, canonical_user, clear_cookie, digest, get_context,
-    now, public_user, rate_limit, record_id, require_admin, resolve_context, retry_transaction, set_cookie,
+    all_rows, authorize, digest, now, public_user, record_id, require_admin, retry_transaction,
 )
 
 
 router = APIRouter(prefix="/admin")
-password_hasher = PasswordHasher(type=Type.ID)
 
 
 class Input(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
-
-class LoginInput(Input):
-    password: str = Field(min_length=1, max_length=1024)
 
 
 class UserInput(Input):
@@ -34,6 +27,7 @@ class UserInput(Input):
 
 class OwnerInput(Input):
     owner_id: str | None
+    expected_revision: int = Field(ge=1)
 
 
 class RestoreInput(Input):
@@ -57,52 +51,20 @@ class ModerationInput(Input):
 async def audit(tx, context, action, target, **data):
     await tx.create("audit", {"actor_id": context.user["id"] if context.user else None,
                               "action": action, "target": target,
-                              "admin_session_id": context.admin_session["id"], **data})
+                              "device_id": context.device["id"] if context.device else None, **data})
 
 
-@router.post("/login")
-async def login(body: LoginInput, request: Request, response: Response):
-    await rate_limit(request, "admin_login", request.app.state.settings.login_attempt_limit)
-    stored = request.app.state.settings.admin_password_hash.get_secret_value()
-    if not stored.startswith("$argon2id$"):
-        raise HTTPException(503, "Admin login is not configured")
-    try:
-        await asyncio.to_thread(password_hasher.verify, stored, body.password)
-    except (VerificationError, InvalidHashError):
-        raise HTTPException(401, "Invalid credentials") from None
-    secret = secrets.token_urlsafe(32)
 
-    async def create(tx):
-        context = await resolve_context(request, tx)
-        if context.admin_session:
-            await tx.update("admin_sessions", context.admin_session["id"], {"revoked_at": now()})
-        return await tx.create("admin_sessions", {"secret_hash": digest(secret),
-                                                  "expires_at": now() + timedelta(seconds=request.app.state.settings.admin_ttl_seconds)})
-
-    await retry_transaction(request.app.state.repo, create)
-    set_cookie(response, request, ADMIN_COOKIE, secret, request.app.state.settings.admin_ttl_seconds)
-    return {"admin": True}
-
-
-@router.post("/logout")
-async def logout(request: Request, response: Response):
-    async def revoke(tx):
-        context = await resolve_context(request, tx)
-        if context.admin_session:
-            await tx.update("admin_sessions", context.admin_session["id"], {"revoked_at": now()})
-
-    await retry_transaction(request.app.state.repo, revoke)
-    clear_cookie(response, request, ADMIN_COOKIE)
-    return {"admin": False}
-
-
-@router.get("/users")
-async def users(request: Request, q: str = Query(default="", max_length=100), start: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=500)):
+@router.get("/users", response_model=AdminUsersResponse)
+async def users(request: Request, q: str = Query(default="", max_length=100), start: int = Query(default=0, ge=0), limit: int = Query(default=20, ge=1, le=500), eligible_owner: bool = False):
     await require_admin(request)
     rows = await all_rows(request.app.state.repo, "users")
+    if eligible_owner:
+        rows = [row for row in rows if row["state"] == "active" and not row.get("merged_into")]
+    rows.sort(key=lambda row: (row["display_name"].casefold(), row["id"]))
     rows = [row for row in rows if q.casefold() in row["display_name"].casefold() or q.casefold() in row["id"].casefold()]
     items = [public_user(row) for row in rows[start:start + limit]]
-    return {"items": items, "users": items, "total": len(rows)}
+    return {"items": items, "users": items, "total": len(rows), "start": start, "limit": limit, "has_more": start + limit < len(rows)}
 
 
 @router.patch("/users/{user_id}")
@@ -130,27 +92,31 @@ async def update_user(user_id: str, body: UserInput, request: Request):
     return {"user": public_user(await retry_transaction(request.app.state.repo, update))}
 
 
-@router.post("/recipes/{recipe_id}/owner")
+@router.post("/recipes/{recipe_id}/owner", response_model=OwnerResult)
 async def assign_owner(recipe_id: str, body: OwnerInput, request: Request):
     recipe_id = record_id(recipe_id, "recipes")
-    owner_id = record_id(body.owner_id, "users") if body.owner_id else None
+    owner_id = record_id(body.owner_id, "users") if body.owner_id is not None else None
 
     async def assign(tx):
         context = await authorize(request, tx, admin=True)
         recipe = await tx.get("recipes", recipe_id)
         if not recipe:
             raise HTTPException(404, "Recipe not found")
-        owner = await canonical_user(tx, owner_id) if owner_id else None
-        if owner_id and not owner:
+        if recipe["revision"] != body.expected_revision:
+            raise HTTPException(409, "Revision changed")
+        owner = await tx.get("users", owner_id) if owner_id else None
+        if owner_id and (not owner or owner["state"] != "active" or owner.get("merged_into")):
             raise HTTPException(422, "Active owner not found")
         if owner:
             await tx.update("users", owner["id"], {})
-        result = await tx.save_recipe_revision(recipe_id, recipe["revision"], {"owner_id": owner["id"] if owner else None},
+        result = await _save_revision(tx, recipe_id, body.expected_revision, {"owner_id": owner["id"] if owner else None},
                                                actor_id=context.user["id"] if context.user else None, reason="admin.owner")
         await audit(tx, context, "recipe.owner", recipe_id, previous_owner_id=recipe["owner_id"], owner_id=result["owner_id"])
-        return {"id": result["id"], "owner_id": result["owner_id"], "revision": result["revision"]}
+        return {"id": result["id"], "owner_id": result["owner_id"], "author_name": owner["display_name"] if owner else None, "revision": result["revision"]}
 
-    return await retry_transaction(request.app.state.repo, assign)
+    result = await retry_transaction(request.app.state.repo, assign)
+    invalidate_catalog(request.app.state.repo)
+    return result
 
 
 @router.get("/recipes/{recipe_id}/revisions")
@@ -174,15 +140,24 @@ async def restore(recipe_id: str, body: RestoreInput, request: Request):
             raise HTTPException(404, "Revision not found")
         if recipe["revision"] != body.expected_revision:
             raise HTTPException(409, "Revision changed")
-        excluded = {"id", "created_at", "updated_at", "revision", "owner_id", "deleted_at"}
+        excluded = {"id", "created_at", "updated_at", "revision", "owner_id", "deleted_at",
+                    "admin", "is_admin", "trusted", "photo_trust", "photo_trusted", "author_name",
+                    "can_edit", "idempotency_user_id", "idempotency_snapshot"}
         content = {key: value for key, value in revision["content"].items() if key not in excluded}
+        try:
+            validate_classifiers(content.get("tags", []))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
         content["deleted_at"] = None
-        result = await tx.save_recipe_revision(recipe_id, body.expected_revision, content,
+        result = await _save_revision(tx, recipe_id, body.expected_revision, content,
                                                actor_id=context.user["id"] if context.user else None, reason="admin.restore")
+        await enqueue_enrichment(tx, result)
         await audit(tx, context, "recipe.restore", recipe_id, revision_id=revision_id)
         return {"id": result["id"], "revision": result["revision"]}
 
-    return await retry_transaction(request.app.state.repo, apply)
+    result = await retry_transaction(request.app.state.repo, apply)
+    invalidate_catalog(request.app.state.repo)
+    return result
 
 
 async def merge_users(tx, source_id, target_id):
@@ -190,6 +165,8 @@ async def merge_users(tx, source_id, target_id):
     target = await tx.get("users", target_id)
     if not source or not target:
         raise HTTPException(404, "User not found")
+    if source.get("is_admin") or target.get("is_admin"):
+        raise HTTPException(409, "Revoke admin permission before merging these profiles.")
     if source_id == target_id:
         raise HTTPException(422, "Choose two distinct profiles")
     if target.get("merged_into"):
@@ -269,7 +246,9 @@ async def merge(body: MergeInput, request: Request):
         await audit(tx, context, "user.merge", target_id, source_id=source_id, target_id=target_id, restrictions=restrictions)
         return {"user": public_user(target), "already_merged": False}
 
-    return await retry_transaction(request.app.state.repo, apply)
+    result = await retry_transaction(request.app.state.repo, apply)
+    invalidate_catalog(request.app.state.repo)
+    return result
 
 
 @router.get("/audit")
@@ -289,6 +268,22 @@ async def photos(request: Request):
 @router.post("/photos/{photo_id}")
 @router.post("/photos/{photo_id}/moderate")
 async def moderate_photo(photo_id: str, body: ModerationInput, request: Request):
-    context = await require_admin(request)
-    return await request.app.state.photos.moderate(record_id(photo_id, "photos"), body.state,
-                                                   actor_id=context.user["id"] if context.user else None)
+    from .photos import _public
+    service = request.app.state.photos
+    photo_id = record_id(photo_id, 'photos')
+
+    async def change(tx):
+        context = await authorize(request, tx, admin=True)
+        row = await tx.get('photos', photo_id)
+        if not row:
+            raise HTTPException(404, 'Photo not found')
+        await service._recipe(tx, row['recipe_id'], touch=True)
+        if body.state == 'approved':
+            await service._active_user(tx, row['uploader_id'], touch=True)
+        if row['status'] not in {'pending', 'approved', 'rejected'}:
+            raise HTTPException(409, 'Photo is not ready for moderation')
+        result = await tx.update('photos', photo_id, {'status': body.state, 'moderated_at': now()})
+        await audit(tx, context, 'photo.moderate', photo_id, previous_status=row['status'], status=body.state)
+        return _public(result)
+
+    return await retry_transaction(request.app.state.repo, change)

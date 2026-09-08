@@ -44,6 +44,7 @@ class User(DomainModel):
     display_name: str = "Anonymous"
     state: str = "active"
     photo_trust: bool = False
+    is_admin: bool = False
     merged_into: ForeignKey("User", on_delete="PROTECT") = None
 
 
@@ -146,7 +147,13 @@ class UsageBucket(DomainModel):
     revision: int = Field(default=1, ge=1)
 
 
+class SiteSettings(DomainModel):
+    model_config = SurrealConfigDict(table_name="site_settings")
+    revision: int = Field(default=1, ge=1)
+    copy: dict[str, str] = Field(default_factory=dict)
+
+
 MODELS = {model.get_table_name(): model for model in (
     User, DeviceCredential, PairingSession, AdminSession, Recipe,
-    RecipeRevision, Photo, EnrichmentJob, AuditEvent, UsageBucket,
+    RecipeRevision, Photo, EnrichmentJob, AuditEvent, UsageBucket, SiteSettings,
 )}
