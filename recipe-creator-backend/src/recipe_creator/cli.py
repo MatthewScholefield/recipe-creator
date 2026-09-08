@@ -314,7 +314,11 @@ def main(argv=None):
                 raise ValueError("Use at least 12 characters")
             if getpass.getpass("Confirm password: ") != password:
                 raise ValueError("Passwords do not match")
-            print(PasswordHasher().hash(password))
+            password_hash = PasswordHasher().hash(password)
+            print("Password hash generated successfully.")
+            print("Add this line to the root .env file:")
+            print(f"RECIPE_ADMIN_PASSWORD_HASH={password_hash}")
+            print("Restart the API after updating .env.")
             return 0
         if args.command == "export-openapi":
             from .app import create_app

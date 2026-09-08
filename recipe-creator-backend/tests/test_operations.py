@@ -164,8 +164,11 @@ def test_hash_password_and_cli_commands(monkeypatch, capsys):
     from argon2 import PasswordHasher
     monkeypatch.setattr(cli.getpass, "getpass", lambda _: "long test password")
     assert cli.main(["hash-password"]) == 0
-    encoded = capsys.readouterr().out.strip()
-    assert encoded.startswith("$argon2id$")
+    output = capsys.readouterr().out
+    line = next(line for line in output.splitlines() if line.startswith("RECIPE_ADMIN_PASSWORD_HASH="))
+    encoded = line.split("=", 1)[1]
+    assert "Add this line to the root .env file:" in output
+    assert "Restart the API after updating .env." in output
     assert PasswordHasher().verify(encoded, "long test password")
     for command in ("migrate", "cleanup", "export-openapi"):
         assert cli.parser().parse_args([command]).command == command

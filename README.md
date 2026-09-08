@@ -30,18 +30,12 @@ AI is optional: add the provider key to `.env` to enable parsing and ingredient 
 
 ### Configure the admin password
 
-Run this from the repository root:
+From the repository root, run:
 
 ```sh
 just hash-password
 ```
 
-Enter the password twice. It must be at least 12 characters. The command only prints an Argon2id hash; it does not edit `.env` or reload a running API. Copy only the final line beginning with `$argon2id$` (not the prompts) and put it on one line in the root `.env` file:
-
-```dotenv
-RECIPE_ADMIN_PASSWORD_HASH=<paste the complete hash printed above>
-```
-
-Replace the placeholder with the complete hash. Keep the `RECIPE_` prefix and do not put the plaintext password or the hash command in `.env`. Restart the API after changing `.env` (`just dev` or `just dev-api`) because settings are loaded at startup. Log in at `/admin` with the original plaintext password. If the UI says admin login is not configured, check that the variable is spelled exactly as shown, that `.env` is in the repository root, and that the API was restarted.
+The command prompts for the password twice and prints the exact `RECIPE_ADMIN_PASSWORD_HASH=...` line to add to the root `.env` file. Restart the API after updating `.env`; log in at `/admin` with the original password. Keep `.env` private and never commit it.
 
 `just help` lists build, import, backup, and restore commands. Maintenance recipes accept CLI arguments directly, for example `just import snapshot.json --dry-run`. Production uses static frontend assets, FastAPI, and SurrealDB; configure HTTPS, secure cookies, allowed origins, and persistent storage in `.env` before deployment. Keep `.env` private and never commit it.
