@@ -1,5 +1,8 @@
 import { test as base, expect, type APIRequestContext, type APIResponse, type BrowserContext, type Page } from '@playwright/test';
 import type { Session, Recipe } from '../src/types';
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 export const origin = `http://127.0.0.1:${Number(process.env.RECIPE_E2E_PORT || 2772)}`;
 export const source = '  A family recipe.\n\n½ cup stock\n\nHeat to 180°C.\n  Wait 20 minutes.\n\nNotes: never rewrite this.  \n';
@@ -23,7 +26,7 @@ export async function createRecipe(api: APIRequestContext): Promise<Recipe> {
   return result.json();
 }
 
-type Fixtures = { second: {context: BrowserContext; page: Page}; owner: Session; recipe: Recipe; adminPassword: string; apiReady: void };
+type Fixtures = { second: {context: BrowserContext; page: Page}; owner: Session; recipe: Recipe; adminPermission: (userId: string, granted: boolean) => Promise<void>; apiReady: void };
 export const test = base.extend<Fixtures>({
   apiReady: [async ({context}, use) => {await session(context.request); await use();}, {auto: true}],
   second: async ({browser}, use) => {
@@ -39,10 +42,15 @@ export const test = base.extend<Fixtures>({
     const current = await context.request.get(`/api/recipes/${encodeURIComponent(recipe.id)}`);
     if (current.ok()) await mutate(context.request, `/recipes/${encodeURIComponent(recipe.id)}?expected_revision=${(await current.json()).revision}`, undefined, 'DELETE');
   },
-  adminPassword: async ({}, use) => {
-    const password = process.env.RECIPE_E2E_ADMIN_PASSWORD;
-    expect(password, 'Set RECIPE_E2E_ADMIN_PASSWORD to the isolated API admin password').toBeTruthy();
-    await use(password!);
+  adminPermission: async ({}, use) => {
+    const granted = new Set<string>();
+    const change = async (userId: string, enabled: boolean) => {
+      const {stdout} = await promisify(execFile)('python3', [fileURLToPath(new URL('./start-backend.py', import.meta.url)),
+        enabled ? 'admin-grant' : 'admin-revoke', '--user-id', userId, '--yes']);
+      expect(JSON.parse(stdout)).toMatchObject({id: userId, is_admin: enabled});
+      if (enabled) granted.add(userId); else granted.delete(userId);
+    };
+    try {await use(change);} finally {for (const userId of granted) await change(userId, false);}
   },
 });
 export { expect };
