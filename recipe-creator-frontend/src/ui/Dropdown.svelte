@@ -8,6 +8,13 @@
   let triggerElement = $state<HTMLElement>();
   function close(focus = true) { open = false; if (focus) tick().then(() => triggerElement?.focus()); }
   function toggle() { open ? close(false) : open = true; }
+  function setCustomTrigger(event: Event) {
+    const target = event.target;
+    const element = target instanceof Element
+      ? target.closest<HTMLElement>('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+      : null;
+    if (element && root?.contains(element)) triggerElement = element;
+  }
   $effect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => { if (!root?.contains(event.target as Node)) close(false); };
@@ -19,7 +26,7 @@
 </script>
 <div class="dropdown" bind:this={root}>
   {#if trigger}
-    <span bind:this={triggerElement} role="presentation" onclick={toggle} onkeydown={(event) => { if (event.key === 'ArrowDown') { event.preventDefault(); open = true; } }}>{@render trigger(open)}</span>
+    <span role="presentation" onclick={(event) => { setCustomTrigger(event); toggle(); }} onkeydown={(event) => { setCustomTrigger(event); if (event.key === 'ArrowDown') { event.preventDefault(); open = true; } }}>{@render trigger(open)}</span>
   {:else}
     <button bind:this={triggerElement} type="button" aria-haspopup="menu" aria-expanded={open} onclick={toggle} onkeydown={(event) => { if (event.key === 'ArrowDown') { event.preventDefault(); open = true; } }}>{label}<Icon name="chevron-down" size={16} /></button>
   {/if}

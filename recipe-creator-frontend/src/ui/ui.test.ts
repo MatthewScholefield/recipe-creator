@@ -7,8 +7,11 @@ import Modal from './Modal.svelte';
 import Spinner from './Spinner.svelte';
 import TagPicker from './TagPicker.svelte';
 import Tooltip from './Tooltip.svelte';
-import type { Snippet } from 'svelte';
+import { createRawSnippet, type Snippet } from 'svelte';
 const emptySnippet = (() => '') as unknown as Snippet;
+const customTrigger = createRawSnippet<[boolean]>(() => ({
+  render: () => '<button type="button" aria-label="Custom profile menu">Profile</button>'
+}));
 
 it('renders a selected icon as SVG and hides unlabelled decorative icons', () => {
   const { container } = render(Icon, {name: 'search'});
@@ -26,6 +29,17 @@ it('opens and closes a dropdown with escape and returns focus', async () => {
   render(Dropdown, {label: 'Profile', children: emptySnippet});
   const trigger = screen.getByRole('button', {name: 'Profile'});
   await fireEvent.click(trigger);
+  expect(screen.getByRole('menu', {name: 'Profile'})).toBeInTheDocument();
+  await fireEvent.keyDown(document, {key: 'Escape'});
+  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  expect(trigger).toHaveFocus();
+});
+
+it('opens and closes a custom-trigger dropdown with escape and returns focus', async () => {
+  render(Dropdown, {label: 'Profile', children: emptySnippet, trigger: customTrigger});
+  const trigger = screen.getByRole('button', {name: 'Custom profile menu'});
+  trigger.focus();
+  await fireEvent.keyDown(trigger, {key: 'ArrowDown'});
   expect(screen.getByRole('menu', {name: 'Profile'})).toBeInTheDocument();
   await fireEvent.keyDown(document, {key: 'Escape'});
   expect(screen.queryByRole('menu')).not.toBeInTheDocument();
