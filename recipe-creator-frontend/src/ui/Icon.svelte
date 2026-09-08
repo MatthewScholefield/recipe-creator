@@ -16,6 +16,6 @@
   interface Props { name: IconName; size?: number; strokeWidth?: number; label?: string; }
   let { name, size = 20, strokeWidth = 2, label }: Props = $props();
   const icons: Record<IconName, Component> = {search: Search, x: X, 'chevron-down': ChevronDown, check: Check, plus: Plus, loader: LoaderCircle, user: User, trash: Trash2, edit: Pencil, bookmark: Bookmark, share: Share2};
-  let selected = $derived(icons[name]);
+  let Selected = $derived(icons[name]);
 </script>
-<selected {size} {strokeWidth} aria-label={label} aria-hidden={label ? undefined : 'true'}></selected>
+<Selected {size} {strokeWidth} aria-label={label} aria-hidden={label ? undefined : 'true'} />

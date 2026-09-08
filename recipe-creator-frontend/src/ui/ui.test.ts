@@ -2,12 +2,20 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { expect, it, vi } from 'vitest';
 import Button from './Button.svelte';
 import Dropdown from './Dropdown.svelte';
+import Icon from './Icon.svelte';
 import Modal from './Modal.svelte';
 import Spinner from './Spinner.svelte';
 import TagPicker from './TagPicker.svelte';
 import Tooltip from './Tooltip.svelte';
 import type { Snippet } from 'svelte';
 const emptySnippet = (() => '') as unknown as Snippet;
+
+it('renders a selected icon as SVG and hides unlabelled decorative icons', () => {
+  const { container } = render(Icon, {name: 'search'});
+  const icon = container.querySelector('svg');
+  expect(icon).toBeInTheDocument();
+  expect(icon).toHaveAttribute('aria-hidden', 'true');
+});
 
 it('requires an accessible name for icon-only button consumers', () => {
   render(Button, {ariaLabel: 'Save recipe', children: emptySnippet});
