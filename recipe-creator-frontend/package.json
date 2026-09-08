@@ -13,6 +13,7 @@
     "generate:api": "bash -o pipefail -c 'uv run --project ../recipe-creator-backend python -m recipe_creator.cli export-openapi | openapi-typescript -o src/api.generated.ts'"
   },
   "dependencies": {
+    "@lucide/svelte": "^1.42.0",
     "browser-image-compression": "^2.0.2",
     "qrcode": "^1.5.4",
     "svelte": "^5.38.0"
