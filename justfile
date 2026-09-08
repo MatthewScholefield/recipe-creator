@@ -7,6 +7,7 @@ NPM := env_var_or_default("NPM", "npm")
 SURREAL := env_var_or_default("SURREAL", "surreal")
 UVICORN_WORKERS := env_var_or_default("UVICORN_WORKERS", "1")
 CLI := UV + " run --project " + BACKEND + " python -m recipe_creator.cli"
+API := UV + " run --project " + BACKEND + " python -m recipe_creator.server"
 
 # Show the available commands and operational safety notes.
 help:
@@ -24,7 +25,7 @@ db:
 # Start the API and frontend development servers together.
 dev:
     #!/bin/sh
-    WEB_CONCURRENCY={{ UVICORN_WORKERS }} {{ UV }} run --project {{ BACKEND }} uvicorn recipe_creator.app:create_app --factory --reload --reload-dir {{ BACKEND }}/src --host 127.0.0.1 --port 2332 --no-proxy-headers &
+    WEB_CONCURRENCY={{ UVICORN_WORKERS }} {{ API }} --reload --reload-dir {{ BACKEND }}/src --host 127.0.0.1 --port 2332 --no-proxy-headers &
     api=$!
     {{ NPM }} --prefix {{ FRONTEND }} run dev &
     web=$!
@@ -33,7 +34,7 @@ dev:
 
 # Start only the API development server.
 dev-api:
-    WEB_CONCURRENCY={{ UVICORN_WORKERS }} {{ UV }} run --project {{ BACKEND }} uvicorn recipe_creator.app:create_app --factory --reload --reload-dir {{ BACKEND }}/src --host 127.0.0.1 --port 2332 --no-proxy-headers
+    WEB_CONCURRENCY={{ UVICORN_WORKERS }} {{ API }} --reload --reload-dir {{ BACKEND }}/src --host 127.0.0.1 --port 2332 --no-proxy-headers
 
 # Start only the frontend development server.
 dev-web:

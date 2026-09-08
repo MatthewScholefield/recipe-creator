@@ -8,6 +8,7 @@ from uuid import uuid5, NAMESPACE_URL
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
+from logly import logger
 from surreal_orm import Q, SurrealDBConnectionManager as Connections
 
 from . import ai
@@ -426,7 +427,8 @@ async def parse(request: Request, body: ParseRequest):
         gaps = result.get("unclassified", "")
         result["unclassified"] = "".join(piece["text"] for piece in gaps) if isinstance(gaps, list) else gaps
         return result
-    except Exception:
+    except Exception as exc:
+        logger.exception("Recipe parsing failed ({})", type(exc).__name__)
         raise HTTPException(503, "Recipe parsing is temporarily unavailable") from None
 
 

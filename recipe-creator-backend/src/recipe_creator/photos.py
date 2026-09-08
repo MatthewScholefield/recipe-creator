@@ -12,6 +12,7 @@ import time
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile
+from logly import logger
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .repository import ConflictError, Repository
@@ -92,6 +93,7 @@ class PhotoService:
                     except asyncio.CancelledError:
                         continue
                     except Exception:
+                        logger.exception("Photo processing task failed while cancellation was pending")
                         break
                 if not task.cancelled():
                     task.exception()
@@ -261,7 +263,7 @@ class PhotoService:
                 await self._mark_deleting(photo_id, "failed", token=token)
                 await self._purge(photo_id)
             except Exception:
-                pass
+                logger.exception("Failed to clean up interrupted photo upload")
             raise
 
     def _path(self, key):

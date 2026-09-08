@@ -1,10 +1,11 @@
 import asyncio
 from contextlib import asynccontextmanager
 from hashlib import sha256
-import logging
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from logly import logger
+from logly.integrations.fastapi import LoglyMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -12,13 +13,14 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import admin, identity, recipes
 from .ai import AIQuotaExceeded
 from .jobs import JobRunner
+from .logging import configure_logging
 from .photos import PhotoService
 from .repository import ConflictError, NotFoundError, Repository
 from .security import SecurityMiddleware, client_ip, get_context, rate_limit, require_user
 from .settings import Settings
 
 
-logger = logging.getLogger(__name__)
+configure_logging()
 
 
 async def cleanup_loop(photos):
@@ -28,7 +30,7 @@ async def cleanup_loop(photos):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.warning("Media cleanup failed (%s)", type(exc).__name__)
+            logger.exception("Media cleanup failed ({})", type(exc).__name__)
         await asyncio.sleep(3600)
 
 
@@ -64,6 +66,7 @@ def create_app(settings: Settings | None = None, repo=None, run_jobs=True):
     app = FastAPI(title="Recipe Creator", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.add_middleware(SecurityMiddleware)
+    app.add_middleware(LoglyMiddleware)
     app.include_router(identity.router, prefix="/api")
     app.include_router(recipes.router, prefix="/api")
     app.include_router(admin.router, prefix="/api")
@@ -91,7 +94,7 @@ def create_app(settings: Settings | None = None, repo=None, run_jobs=True):
 
     @app.exception_handler(Exception)
     async def unexpected_error(request, exc):
-        logger.error("Request failed (%s)", type(exc).__name__)
+        logger.exception("Request failed ({})", type(exc).__name__)
         return error_response(503, "Service temporarily unavailable")
 
     @app.middleware("http")
@@ -109,7 +112,8 @@ def create_app(settings: Settings | None = None, repo=None, run_jobs=True):
     async def ready(request: Request):
         try:
             await request.app.state.repo.list("recipes", limit=1)
-        except Exception:
+        except Exception as exc:
+            logger.exception("Readiness check failed ({})", type(exc).__name__)
             raise HTTPException(503, "Not ready") from None
         return {"status": "ok"}
 

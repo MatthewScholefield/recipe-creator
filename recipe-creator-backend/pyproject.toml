@@ -13,6 +13,7 @@ dependencies = [
   "python-multipart==0.0.32",
   "httpx==0.28.1",
   "uvicorn[standard]==0.52.4",
+  "logly==0.2.2",
 ]
 
 [dependency-groups]

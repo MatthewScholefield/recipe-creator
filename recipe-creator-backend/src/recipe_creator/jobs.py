@@ -6,15 +6,14 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 import json
-import logging
 from uuid import uuid4
+
+from logly import logger
 
 from .ai import consume_ai_quota, estimate_grams
 from .ingredients import enrich_ingredient_groups, estimation_eligible, ingredient_hash
 from .repository import ConflictError
 from .settings import Settings
-
-logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -127,7 +126,7 @@ class JobRunner:
                 raise
             except Exception as exc:
                 # Provider/database messages can contain source text or credentials.
-                logger.warning("Enrichment polling failed (%s)", type(exc).__name__)
+                logger.exception("Enrichment polling failed ({})", type(exc).__name__)
             try:
                 await asyncio.wait_for(self._stop.wait(), self.settings.job_poll_seconds)
             except TimeoutError:
