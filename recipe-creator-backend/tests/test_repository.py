@@ -14,13 +14,14 @@ from surreal_orm import SurrealDBConnectionManager as Connections
 from surreal_orm.migrations import Migration
 from surreal_orm.migrations.operations import CreateTable, RawSQL
 
-from recipe_creator.models import MODELS, Recipe
+from recipe_creator.models import MODELS, Recipe, SiteSettings
 from recipe_creator.repository import ConflictError, NotFoundError, Repository, _MigrationExecutor
 from recipe_creator.settings import Settings
 
 
 def test_model_registry_and_nested_validation():
     assert set(MODELS) == {"users", "devices", "pairings", "admin_sessions", "recipes", "revisions", "photos", "jobs", "audit", "usage", "site_settings"}
+    assert SiteSettings(copy={"site_title": "Recipes"}).model_dump()["copy"] == {"site_title": "Recipes"}
     with pytest.raises(ValidationError):
         Recipe(ingredient_groups=[{"ingredients": [{"grams": -1}]}])
 

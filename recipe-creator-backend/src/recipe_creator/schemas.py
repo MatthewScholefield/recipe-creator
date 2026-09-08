@@ -267,13 +267,17 @@ DEFAULT_SITE_COPY = dict(site_title='Recipes', site_tagline='Share your food.', 
 
 
 class SiteSettings(BaseModel):
+    model_config = ConfigDict(validate_by_name=True, serialize_by_alias=True)
+
     revision: int
-    copy: SiteCopy
+    site_copy: SiteCopy = Field(alias='copy')
 
 
 class SiteSettingsUpdate(StrictDTO):
+    model_config = ConfigDict(validate_by_name=True, serialize_by_alias=True)
+
     expected_revision: int = Field(ge=0)
-    copy: SiteCopy
+    site_copy: SiteCopy = Field(alias='copy')
 
 
 class RecipeSummary(BaseModel):

@@ -148,9 +148,9 @@ class UsageBucket(DomainModel):
 
 
 class SiteSettings(DomainModel):
-    model_config = SurrealConfigDict(table_name="site_settings")
+    model_config = SurrealConfigDict(table_name="site_settings", validate_by_name=True, serialize_by_alias=True)
     revision: int = Field(default=1, ge=1)
-    copy: dict[str, str] = Field(default_factory=dict)
+    site_copy: dict[str, str] = Field(default_factory=dict, alias="copy")
 
 
 MODELS = {model.get_table_name(): model for model in (

@@ -23,7 +23,7 @@ async def update_settings(body: SiteSettingsUpdate, request: Request):
         previous = row['copy'] if row else DEFAULT_SITE_COPY
         if (row['revision'] if row else 0) != body.expected_revision:
             raise HTTPException(409, 'Revision changed')
-        data = {'copy': body.copy.model_dump()}
+        data = {'copy': body.site_copy.model_dump()}
         if row:
             result = await tx.compare_and_swap('site_settings', 'public', body.expected_revision, data)
         else:

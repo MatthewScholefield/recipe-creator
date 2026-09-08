@@ -12,7 +12,9 @@ from test_admin import login
 
 
 def test_copy_strict_limits():
-    SiteSettingsUpdate(expected_revision=0, copy=DEFAULT_SITE_COPY)
+    settings = SiteSettingsUpdate(expected_revision=0, copy=DEFAULT_SITE_COPY)
+    assert settings.site_copy.model_dump() == DEFAULT_SITE_COPY
+    assert settings.model_dump() == {'expected_revision': 0, 'copy': DEFAULT_SITE_COPY}
     for changes in ({'site_title': ' '}, {'site_title': 'x' * 81}, {'home_title': ''},
                     {'footer_text': '\x00'}, {'unknown': 'secret'}, {'home_intro': 'x' * 301}):
         with pytest.raises(ValidationError):
