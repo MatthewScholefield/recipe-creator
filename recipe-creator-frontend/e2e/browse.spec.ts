@@ -150,7 +150,7 @@ test('home groups legacy classifiers once and combines full-catalog keyboard tag
   expect(requests.at(-1)?.searchParams.getAll('tag')).toEqual(['vegetarian', 'dinner']);
   await expect(page.getByRole('heading', {name: 'Results', level: 1})).toBeVisible();
   await search(page, 'unknown:field');
-  await expect(page.getByRole('status')).toContainText('Unknown search field: unknown');
+  await expect(page.locator('p.notice[role="status"]').filter({hasText: 'Unknown search field: unknown'})).toHaveText('Unknown search field: unknown');
   verify();
 });
 
