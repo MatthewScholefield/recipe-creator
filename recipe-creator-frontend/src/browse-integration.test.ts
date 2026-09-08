@@ -19,7 +19,6 @@ function mockApi(handler: (url: URL, init?: RequestInit) => unknown | Promise<un
 }
 beforeEach(() => {
   appState.identity = null; setSiteCopy({...DEFAULT_SITE_COPY});
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
 });
 
 it('refetches all saved chunks on refinements and ignores a late previous generation', async () => {
