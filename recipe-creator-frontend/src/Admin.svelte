@@ -1,30 +1,43 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { request, mutate, session, message, photoUrl, id } from './api';
-  import type { Session, AdminPhoto, User } from './types';
-  interface Revision {id: string; revision?: number; created_at?: string; content?: {title?: string}}
-  let identity = $state<Session>(), password = $state(''), busy = $state(false), error = $state(''), notice = $state(''), tab = $state('photos');
-  let photos = $state<AdminPhoto[]>([]), users = $state<User[]>([]), query = $state(''), recipeId = $state(''), ownerId = $state(''), revision = $state(1), revisions = $state<Revision[]>([]);
+  import { ApiError, request, mutate, message, photoUrl, id } from './api';
+  import { appState, refreshIdentity, DEFAULT_SITE_COPY, setSiteCopy } from './app-state.svelte';
+  import Spinner from './ui/Spinner.svelte';
+  import type { AdminPhoto, User, SiteCopy, SiteSettings } from './types';
+  const identity = $derived(appState.identity);
+  let busy = $state(false), error = $state(''), notice = $state(''), tab = $state('photos');
+  let photos = $state<AdminPhoto[]>([]), users = $state<User[]>([]), query = $state('');
+  let copy = $state<SiteCopy>({...DEFAULT_SITE_COPY}), copyRevision = $state(0), copyLoaded = $state(false);
+  const copyFields: {key: keyof SiteCopy; label: string; max: number; required?: boolean}[] = [
+    {key:'site_title',label:'Site title',max:80,required:true}, {key:'site_tagline',label:'Site tagline',max:160},
+    {key:'home_title',label:'Home title',max:120,required:true}, {key:'home_intro',label:'Home introduction',max:300}, {key:'footer_text',label:'Footer text',max:200},
+  ];
+  async function loadCopy() {const result = await request<SiteSettings>('/site-settings'); copy = {...result.copy}; copyRevision = result.revision; copyLoaded = true;}
+  async function saveCopy() {
+    await action(async () => {
+      try {
+        const result = await mutate<SiteSettings>('/admin/site-settings', {expected_revision: copyRevision, copy: {...copy}}, 'PUT');
+        copy = {...result.copy}; copyRevision = result.revision; setSiteCopy(result.copy); notice = 'Site text saved.';
+      } catch(e) {
+        if (e instanceof ApiError && e.status === 409) throw new Error('Site text changed elsewhere. Your edits are kept. Reload saved text to discard them and load the latest version.');
+        throw e;
+      }
+    });
+  }
   let sourceId = $state(''), targetId = $state(''), preview = $state<Record<string, unknown>>(), previewKey = $state(''), mergeConfirmed = $state(false), audit = $state<Record<string, unknown>[]>([]);
-  onMount(() => {void action(async () => {identity = await session(); if (identity.admin) await loadTab('photos');});});
+  onMount(() => {void action(async () => {await refreshIdentity(); if (appState.identity?.admin) await loadTab('photos');});});
   async function action(fn: () => Promise<void>) {busy = true; error = ''; notice = ''; try {await fn();} catch(e) {error = message(e);} finally {busy = false;} }
-  async function loadTab(value: string) {tab = value; if (value === 'photos') photos = (await request<{photos: AdminPhoto[]}>('/admin/photos')).photos; else if (value === 'users') users = (await request<{users: User[]}>(`/admin/users?q=${encodeURIComponent(query)}`)).users; else if (value === 'audit') audit = (await request<{events: Record<string, unknown>[]}>('/admin/audit')).events;}
+  async function loadTab(value: string) {tab = value; if (value === 'photos') photos = (await request<{photos: AdminPhoto[]}>('/admin/photos')).photos; else if (value === 'users') users = (await request<{users: User[]}>(`/admin/users?q=${encodeURIComponent(query)}`)).users; else if (value === 'copy' && !copyLoaded) await loadCopy(); else if (value === 'audit') audit = (await request<{events: Record<string, unknown>[]}>('/admin/audit')).events;}
   async function moderate(photo: AdminPhoto, state: AdminPhoto['status']) {const result = await mutate<AdminPhoto>(`/admin/photos/${id(photo.id)}/moderate`, {state}); photo.status = result.status; notice = `Photo ${state}.`;}
   async function updateUser(user: User, changes: Partial<User>) {await mutate(`/admin/users/${id(user.id)}`, changes, 'PATCH'); Object.assign(user, changes); notice = 'Profile updated. Historical photos are not automatically approved or hidden.';}
 </script>
-<p class="eyebrow">Collection care</p>
 <h1>Admin</h1>
-<p>Admin access is separate from contributor profiles and is never shared through device pairing.</p>
+<p>Manage contributions and site text. Admin access belongs to your current profile, including its connected devices.</p>
 {#if error}<p role="alert" class="notice error">{error}</p>{/if}{#if notice}<p role="status" class="notice">{notice}</p>{/if}
-{#if identity && !identity.admin}<form onsubmit={(event) => {event.preventDefault(); void action(async () => {const input = password; password = ''; await mutate('/admin/login', {password: input}); identity = await session(true); await loadTab('photos');});}}>
-<label>Admin password<input type="password" required bind:value={password} autocomplete="current-password">
-</label>
-<button class="primary" disabled={busy}>Log in</button>
-</form>
-{:else if identity?.admin}<div class="toolbar">
-<nav class="toolbar" aria-label="Admin sections">{#each ['photos','users','recipes','merge','audit'] as item}<button aria-pressed={tab === item} disabled={busy} onclick={() => void action(() => loadTab(item))}>{item}</button>{/each}</nav>
-<button disabled={busy} onclick={() => void action(async () => {await mutate('/admin/logout'); identity = await session(true);})}>Log out</button>
-</div>
+
+{#if busy}<Spinner label="Loading admin changes" />{/if}
+{#if identity && !identity.admin}<p class="notice">Your current profile does not have admin access.</p><a href="/profile">Go to profile</a>
+{:else if identity?.admin}<nav class="toolbar" aria-label="Admin sections">{#each ['photos','users','copy','merge','audit'] as item}<button aria-pressed={tab === item} disabled={busy} onclick={() => void action(() => loadTab(item))}>{item === 'copy' ? 'Site text' : item}</button>{/each}</nav>
 {#if tab === 'photos'}<h2>Photo moderation</h2>
 <p>Approve each pending photo individually. Trust applies only to future contributions.</p>
 <div class="photo-grid">{#each photos as photo}<figure>
@@ -34,7 +47,7 @@
 <figcaption>{photo.caption}<small>{photo.uploader_name || photo.uploader_id} · {photo.status}</small>
 <a href={`/recipes/${id(photo.recipe_id)}`}>View recipe</a>
 <div class="toolbar">{#each ['approved','rejected','pending'] as const as state}<button disabled={busy || photo.status === state} onclick={() => void action(() => moderate(photo, state))}>{state === 'approved' ? 'Approve' : state === 'rejected' ? 'Reject' : 'Return to pending'}</button>{/each}</div>{#if photo.uploader_id}<button disabled={busy} onclick={() => {if (confirm('Trust this contributor for future photos? Existing pending photos will still need approval.')) void action(async () => {await mutate(`/admin/users/${id(photo.uploader_id!)}`, {photo_trusted: true}, 'PATCH'); notice = 'Contributor trusted for future photos only.';});}}>Trust future photos</button>{/if}</figcaption>
-</figure>{/each}</div>{#if !photos.length}<p>No photos to review.</p>{/if}
+</figure>{/each}</div>{#if !busy && !photos.length}<p>No photos to review.</p>{/if}
 {:else if tab === 'users'}<h2>Profiles</h2>
 <form class="toolbar" onsubmit={(event) => {event.preventDefault(); void action(() => loadTab('users'));}}>
 <label>Name or profile ID<input bind:value={query}>
@@ -51,24 +64,14 @@
 <button disabled={busy} onclick={() => {if (confirm('Approve all currently listed pending photos by this contributor? This is separate from trusting future uploads.')) void action(async () => {const pending = (await request<{photos: AdminPhoto[]}>('/admin/photos')).photos.filter(photo => photo.uploader_id === user.id && photo.status === 'pending'); for (const photo of pending) await moderate(photo, 'approved'); notice = `${pending.length} listed pending photos approved.`;});}}>Approve existing pending photos</button>
 </div>
 </section>{/each}
-{:else if tab === 'recipes'}<h2>Recipe ownership & recovery</h2>
-<label>Recipe ID<input bind:value={recipeId} disabled={busy} oninput={() => revisions = []}>
-</label>{#if recipeId}<p>
-<a href={`/recipes/${id(recipeId)}/edit`}>Edit recipe</a> · <a href={`/recipes/${id(recipeId)}`}>View current recipe</a>
-</p>{/if}<form onsubmit={(event) => {event.preventDefault(); if (confirm('Transfer recipe ownership to this exact profile ID?')) void action(async () => {await mutate(`/admin/recipes/${id(recipeId)}/owner`, {owner_id: ownerId}); notice = 'Ownership transferred.';});}}>
-<label>New owner profile ID<input required bind:value={ownerId}>
-</label>
-<button disabled={busy || !recipeId}>Assign / transfer owner</button>
+{:else if tab === 'copy'}<h2>Site text</h2>
+<p>Change only the public headings and supporting text. Recipe text is not affected.</p>
+{#if copyLoaded}<form onsubmit={(event) => {event.preventDefault(); void saveCopy();}}>
+{#each copyFields as field}<label>{field.label}<input bind:value={copy[field.key]} maxlength={field.max} required={field.required} disabled={busy}></label>{/each}
+<div class="toolbar"><button class="primary" disabled={busy || !copy.site_title.trim() || !copy.home_title.trim()}>Save site text</button><button type="button" disabled={busy} onclick={() => copy = {...DEFAULT_SITE_COPY}}>Reset to defaults</button></div>
 </form>
-<section>
-<h3>Revision history</h3>
-<button disabled={busy || !recipeId} onclick={() => void action(async () => {revisions = (await request<{revisions: Revision[]}>(`/admin/recipes/${id(recipeId)}/revisions`)).revisions;})}>Load revisions (including deleted recipes)</button>
-<label>Expected current revision<input type="number" min="1" required bind:value={revision} disabled={busy}>
-</label>{#each revisions as entry}<div class="list-row">
-<span>{entry.content?.title || 'Recipe revision'} · {entry.revision || entry.id}<small>{entry.created_at || ''}</small>
-</span>
-<button disabled={busy} onclick={() => {if (confirm('Restore this revision? This records a new revision and may recover a deleted recipe.')) void action(async () => {await mutate(`/admin/recipes/${id(recipeId)}/restore`, {revision_id: entry.id, expected_revision: revision}); notice = 'Revision restored. Reload the recipe before making more changes.'; revisions = [];});}}>Restore</button>
-</div>{/each}</section>
+<section class="notice" aria-label="Site text preview"><h3>Preview</h3><strong>{copy.site_title}</strong>{#if copy.site_tagline}<p>{copy.site_tagline}</p>{/if}<h4>{copy.home_title}</h4>{#if copy.home_intro}<p>{copy.home_intro}</p>{/if}{#if copy.footer_text}<p>{copy.footer_text}</p>{/if}</section>{/if}
+<button type="button" disabled={busy} onclick={() => void action(loadCopy)}>Reload saved text (discard edits)</button>
 {:else if tab === 'merge'}<h2>Merge profiles</h2>
 <p>Verify ownership with the people involved outside this website first. The source will become the surviving target profile. Review blocked/trusted state conflicts; no admin privilege is transferred.</p>
 <form onsubmit={(event) => {event.preventDefault(); void action(async () => {const source = sourceId, target = targetId; preview = undefined; mergeConfirmed = false; const result = await request<Record<string, unknown>>(`/admin/merge/preview?source_id=${id(source)}&target_id=${id(target)}`); if (source !== sourceId || target !== targetId) return; preview = result; previewKey = `${source}:${target}`;});}}>
@@ -84,5 +87,5 @@
 <input type="checkbox" bind:checked={mergeConfirmed}>I verified ownership and reviewed recipe, photo, device, and trust/block changes</label>
 <button class="danger" disabled={busy || !mergeConfirmed || previewKey !== `${sourceId}:${targetId}`} onclick={() => {if (confirm('Merge these profiles now? This cannot be undone with the profile editor.')) void action(async () => {await mutate('/admin/merge', {source_id: sourceId, target_id: targetId, confirm: true}); preview = undefined; sourceId = ''; targetId = ''; notice = 'Profiles merged. Review the audit log.';});}}>Confirm profile merge</button>
 </section>{/if}
-{:else if tab === 'audit'}<h2>Audit events</h2>{#each audit as event}<pre class="audit">{JSON.stringify(event, null, 2)}</pre>{/each}{#if !audit.length}<p>No audit events returned.</p>{/if}{/if}
+{:else if tab === 'audit'}<h2>Audit events</h2>{#each audit as event}<pre class="audit">{JSON.stringify(event, null, 2)}</pre>{/each}{#if !busy && !audit.length}<p>No audit events returned.</p>{/if}{/if}
 {:else}<p role="status">Checking admin access…</p>{/if}

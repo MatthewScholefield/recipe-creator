@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
+import { appState, DEFAULT_SITE_COPY, setSiteCopy } from './app-state.svelte';
+beforeEach(() => {appState.identity = null; setSiteCopy({...DEFAULT_SITE_COPY});});
 import Editor from './Editor.svelte';
 import Browse from './Browse.svelte';
 import Detail from './Detail.svelte';
@@ -18,7 +20,7 @@ it('uses the actual admin photo wrapper, raw status, and moderation route', asyn
 });
 it('uses device wrappers and requests server-owned summaries for My recipes', async () => {
   const fetcher = mockApi(url => url === '/api/session' ? identity : url === '/api/devices' ? {devices:[{id:'d1',current:true,revoked_at:null}]} : {items:[recipe],has_more:false});
-  render(Profile,{consumeToken:vi.fn()}); await screen.findByText(/this device/); await fireEvent.click(screen.getByRole('button',{name:'My recipes'}));
+  render(Profile,{consumeToken:vi.fn()}); await screen.findByText(/Browser \(this device\)/); await fireEvent.click(screen.getByRole('button',{name:'My recipes'}));
   expect(await screen.findByRole('link',{name:'Soup'})).toBeInTheDocument(); expect(fetcher.mock.calls.some(([url]) => url === '/api/recipes?owner_id=u1&offset=0&limit=100')).toBe(true);
 });
 it('does not navigate after a publishing editor is unmounted', async () => {
@@ -79,7 +81,7 @@ it('scales only ingredients and exposes originals with native keyboard disclosur
   mockApi(() => recipe); render(Detail,{recipeId:'r1',navigate:vi.fn()}); await screen.findByRole('heading',{name:'Soup'}); await fireEvent.click(screen.getByRole('button',{name:'2×'})); expect(screen.getByText('1 cup stock')).toBeInTheDocument(); expect(screen.getByText('Simmer 20 minutes at 180°C.')).toBeInTheDocument(); expect(screen.getByText('Original & weight details').tagName).toBe('SUMMARY'); await fireEvent.click(screen.getByRole('button',{name:'Save for later'})); await waitFor(() => expect(JSON.parse(localStorage.getItem('notebook:bookmarks')!)).toEqual(['r1']));
 });
 it('pairing requires a request and explicit destination confirmation before switching', async () => {
-  const fetcher = mockApi(url => url === '/api/session' ? identity : url === '/api/devices' ? {devices:[]} : {id:'pair',display_name:'Other cook',status:'approved',has_existing_profile:true});
+  const fetcher = mockApi(url => url === '/api/session' ? identity : url === '/api/devices' ? {devices:[]} : url.startsWith('/api/recipes?') ? {items:[],has_more:false} : {id:'pair',display_name:'Other cook',status:'approved',has_existing_profile:true});
   render(Profile,{token:'private-token',consumeToken:vi.fn()}); await screen.findByRole('heading',{name:'Use an existing profile'}); expect(fetcher.mock.calls.some(([url]) => String(url).includes('pairings'))).toBe(false);
-  await fireEvent.click(screen.getByRole('button',{name:'Request connection'})); const complete = await screen.findByRole('button',{name:'Complete connection'}); expect(complete).toBeDisabled(); expect(screen.getByText(/will NOT merge/)).toBeInTheDocument(); await fireEvent.click(screen.getByLabelText('I want to switch this browser to this profile')); expect(complete).toBeEnabled(); await fireEvent.click(complete); await waitFor(() => expect(fetcher.mock.calls.some(([url,init]) => String(url).endsWith('/complete') && init?.body === JSON.stringify({switch_profile:true}))).toBe(true));
+  await fireEvent.click(screen.getByRole('button',{name:'Request connection'})); const complete = await screen.findByRole('button',{name:'Complete connection'}); expect(complete).toBeDisabled(); expect(screen.getByText(/will NOT merge/)).toBeInTheDocument(); await fireEvent.click(screen.getByLabelText('I want to switch this browser to this profile')); await waitFor(() => expect(complete).toBeEnabled()); await fireEvent.click(complete); await waitFor(() => expect(fetcher.mock.calls.some(([url,init]) => String(url).endsWith('/complete') && init?.body === JSON.stringify({switch_profile:true}))).toBe(true));
 });
