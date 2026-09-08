@@ -65,6 +65,20 @@ async def test_logly_middleware_serves_session_through_asgi_stack(log_output):
     assert "private name" not in output
 
 
+def test_configure_logging_preserves_exception_details_in_default_sink():
+    output = StringIO()
+    configure_logging(sink=output)
+    try:
+        raise RuntimeError("database unavailable")
+    except RuntimeError as exc:
+        logly_logger.opt(exception=exc).error("Request failed")
+
+    rendered = output.getvalue()
+    assert "Request failed" in rendered
+    assert "RuntimeError: database unavailable" in rendered
+    assert "Traceback" in rendered
+
+
 async def test_logly_middleware_logs_unexpected_failure_with_traceback(monkeypatch, log_output):
     application = app.create_app(run_jobs=False)
 

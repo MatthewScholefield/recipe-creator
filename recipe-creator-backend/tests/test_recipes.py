@@ -1,5 +1,6 @@
 import asyncio
 from datetime import timedelta
+from io import StringIO
 import os
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 import pytest
 import pytest_asyncio
+from logly import logger as logly_logger
 
 from recipe_creator import ai, recipes
 from recipe_creator.ingredients import ingredient_hash
@@ -158,6 +160,20 @@ async def test_search_projection_pagination_and_cache(app, monkeypatch):
         assert (await browser.get("/recipes", params={"q": "$x); DELETE recipes;"})).status_code == 200
         assert (await browser.get("/tags")).json()["tags"] == ["breakfast", "dinner", "lunch", "other"]
         assert (await browser.get("/recipes?limit=101")).status_code == 422
+
+
+async def test_catalog_projection_does_not_log_orm_validation_fallback(app):
+    output = StringIO()
+    sink = logly_logger.add(output, format="{message}\n", enqueue=False)
+    try:
+        async with client(app) as browser:
+            await identify(app, browser)
+            assert (await browser.post("/recipes", json=draft())).status_code == 201
+            assert (await browser.get("/recipes")).status_code == 200
+    finally:
+        logly_logger.remove(sink)
+
+    assert "Pydantic invalid format for the class" not in output.getvalue()
 
 
 async def test_owner_admin_blocked_and_scoped_keys(app):

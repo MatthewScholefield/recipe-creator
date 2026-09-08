@@ -77,10 +77,9 @@ async def _project(repo, fields, condition=None):
             query = RecipeModel.objects().select(*fields).filter(deleted_at=None, status="published")
             if condition is not None:
                 query.filter(condition)
-            page = await query.order_by("id").offset(offset).limit(1000).exec()
-            for row in page:
-                value = row if isinstance(row, dict) else repo._output(row)
-                rows.append(value)
+            query = query.order_by("id").offset(offset).limit(1000)
+            page = await query._execute_query(query._compile_query())
+            rows.extend(page)
             if len(page) < 1000:
                 return rows
             offset += len(page)
