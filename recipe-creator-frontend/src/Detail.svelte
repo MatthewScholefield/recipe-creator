@@ -12,6 +12,7 @@
   import Modal from './ui/Modal.svelte';
   import Spinner from './ui/Spinner.svelte';
   import Tooltip from './ui/Tooltip.svelte';
+  import BackLink from './ui/BackLink.svelte';
 
   let { recipeId, navigate }: { recipeId: string; navigate: (path: string) => void } = $props();
   let recipe = $state<Recipe>(), error = $state(''), status = $state(''), scale = $state(1), grams = $state(load('grams', false));
@@ -37,13 +38,13 @@
 {#if error}<p class="notice error" role="alert">{error} <button onclick={fetchRecipe}>Reload recipe</button></p>{/if}
 {#if recipe}
 <article class="recipe">
-<a class="back" href="/">← The collection</a>
+<BackLink href="/" label="Back to collection" />
 <div class="byline"><p class="eyebrow">From {recipe.author_name || 'Unknown author'}</p><AuthorPicker {recipe} onchanged={updateAuthor} /></div>
 <h1>{recipe.title}</h1>
 <p class="prose lead">{recipe.description}</p>
 <div class="chips">{#each recipe.tags as tag}<Tag label={tag} href={`/?q=${encodeURIComponent(`tag:${tag}`)}`} />{/each}</div>
 {#if recipe.yield_amount}<p>Makes {recipe.yield_amount} {recipe.yield_unit}</p>{/if}
-{#if safeUrl(recipe.source_url)}<p><a href={safeUrl(recipe.source_url)} target="_blank" rel="noopener noreferrer">Original source ↗</a></p>{/if}
+{#if safeUrl(recipe.source_url)}<p><Button variant="ghost" size="sm" href={safeUrl(recipe.source_url)} target="_blank" rel="noopener noreferrer"><Icon name="external-link" size={16} />Original source</Button></p>{/if}
 {#if recipe.modifications}<section><h2>Our modifications</h2><p class="prose">{recipe.modifications}</p></section>{/if}
 <div class="toolbar no-print">
   <Button variant="ghost" size="sm" ariaLabel={bookmarks.includes(recipe.id) ? 'Remove saved recipe' : 'Save for later'} onclick={() => bookmarks = bookmarks.includes(recipe!.id) ? bookmarks.filter(value => value !== recipe!.id) : [...bookmarks, recipe!.id]}><Icon name="bookmark" label={bookmarks.includes(recipe.id) ? 'Saved' : 'Save for later'} /></Button>
@@ -54,7 +55,7 @@
 </div>
 {#if status}<p role="status" class="notice">{status}</p>{/if}
 {#if recipe.mode === 'text'}<p class="notice">Shared as written. Ingredient scaling and gram tools are unavailable until this recipe is organized.</p>
-<div class="prose recipe-body">{recipe.source_text}</div>{#if recipe.can_edit}<a href={`/recipes/${id(recipe.id)}/edit`}>Organize ingredients in the editor</a>{/if}
+<div class="prose recipe-body">{recipe.source_text}</div>{#if recipe.can_edit}<Button variant="secondary" size="sm" href={`/recipes/${id(recipe.id)}/edit`}><Icon name="edit" size={16} />Organize ingredients</Button>{/if}
 {:else}
 <section class="cooking-controls no-print" aria-label="Cooking controls">
   <div class="controls-heading"><h2>Ingredients</h2><Tooltip text="Adjust servings and units"><button class="small-control" aria-label="Adjust ingredient scale" aria-expanded={controlsOpen} onclick={() => controlsOpen = !controlsOpen}><Icon name="edit" label="Adjust ingredient scale" /></button></Tooltip></div>

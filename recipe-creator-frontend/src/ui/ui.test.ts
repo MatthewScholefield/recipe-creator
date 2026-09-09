@@ -5,8 +5,9 @@ import Dropdown from './Dropdown.svelte';
 import Icon from './Icon.svelte';
 import Modal from './Modal.svelte';
 import Spinner from './Spinner.svelte';
-import TagPicker from './TagPicker.svelte';
 import Tag from './Tag.svelte';
+import IconButton from './IconButton.svelte';
+import TagPicker from './TagPicker.svelte';
 import Tooltip from './Tooltip.svelte';
 import { createRawSnippet, type Snippet } from 'svelte';
 const emptySnippet = (() => '') as unknown as Snippet;
@@ -24,6 +25,14 @@ it('renders a selected icon as SVG and hides unlabelled decorative icons', () =>
 it('requires an accessible name for icon-only button consumers', () => {
   render(Button, {ariaLabel: 'Save recipe', children: emptySnippet});
   expect(screen.getByRole('button', {name: 'Save recipe'})).toBeInTheDocument();
+});
+
+it('renders an icon-only route control as an accessible styled link', () => {
+  render(IconButton, {href: '/saved', ariaLabel: 'Saved recipes', title: 'Saved recipes', children: emptySnippet});
+  const link = screen.getByRole('link', {name: 'Saved recipes'});
+  expect(link).toHaveAttribute('href', '/saved');
+  expect(link).toHaveAttribute('title', 'Saved recipes');
+  expect(link).toHaveClass('icon-only');
 });
 
 it('opens and closes a dropdown with escape and returns focus', async () => {

@@ -27,7 +27,7 @@ it('uses the actual admin photo wrapper, raw status, and moderation route', asyn
 it('uses device wrappers and requests server-owned summaries for My recipes', async () => {
   const fetcher = mockApi(url => url === '/api/session' ? identity : url === '/api/devices' ? {devices:[{id:'d1',current:true,revoked_at:null}]} : {items:[recipe],has_more:false});
   render(Profile,{consumeToken:vi.fn()}); await screen.findByText(/Browser \(this device\)/); await fireEvent.click(screen.getByRole('button',{name:'My recipes'}));
-  expect(await screen.findByRole('link',{name:'Soup'})).toBeInTheDocument(); expect(fetcher.mock.calls.some(([url]) => url === '/api/recipes?owner_id=u1&offset=0&limit=100')).toBe(true);
+  expect(await screen.findByRole('link',{name:/Soup/})).toBeInTheDocument(); expect(fetcher.mock.calls.some(([url]) => url === '/api/recipes?owner_id=u1&offset=0&limit=100')).toBe(true);
 });
 it('does not navigate after a publishing editor is unmounted', async () => {
   let finish!: (value: unknown) => void;

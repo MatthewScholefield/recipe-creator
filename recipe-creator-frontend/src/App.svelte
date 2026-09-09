@@ -9,6 +9,8 @@
   import { message } from './api';
   import Dropdown from './ui/Dropdown.svelte';
   import Modal from './ui/Modal.svelte';
+  import Button from './ui/Button.svelte';
+  import BackLink from './ui/BackLink.svelte';
   import Icon from './ui/Icon.svelte';
   import Spinner from './ui/Spinner.svelte';
   let route = $state(location.pathname + location.search);
@@ -40,7 +42,7 @@
   <form class="search" onsubmit={(event) => {event.preventDefault(); navigate(browseUrl({q: search, tags: params.getAll('tag'), saved: pathname === '/saved'}));}}>
     <label class="sr-only" for="search">Search recipes</label><input id="search" type="search" bind:value={search} placeholder="Search recipes"><button aria-label="Search recipes"><Icon name="search" /></button>
   </form>
-  <nav aria-label="Main"><a class="button primary" href="/new"><Icon name="plus" size={18} /> Add recipe</a><a href="/saved">Saved</a></nav>
+  <nav aria-label="Main"><Button variant="primary" size="sm" href="/new"><Icon name="plus" size={18} /> Add recipe</Button><Button variant="secondary" size="sm" href="/saved"><Icon name="bookmark" size={18} /> Saved</Button></nav>
   <div class="profile-menu">
     <Dropdown label="Profile menu">
       {#snippet trigger(open)}<button type="button" class:anonymous={!user} aria-label="Profile menu" aria-haspopup="menu" aria-expanded={open}><Icon name="user" /><span>{user?.display_name || 'Anonymous'}</span><Icon name="chevron-down" size={16} /></button>{/snippet}
@@ -62,7 +64,7 @@
       {#key pairingVersion}{#await import('./Profile.svelte')}<Spinner label="Loading profile" />{:then {default: Profile}}<Profile token={pairingToken} consumeToken={() => pairingToken = ''} />{:catch}<p role="alert">Could not load your profile. Reload to try again.</p>{/await}{/key}
     {:else if pathname === '/admin'}
       {#await import('./Admin.svelte')}<Spinner label="Loading admin" />{:then {default: Admin}}<Admin />{:catch}<p role="alert">Could not load admin. Reload to try again.</p>{/await}
-    {:else}<h1>Page not found</h1><a href="/">Back to recipes</a>{/if}
+    {:else}<h1>Page not found</h1><BackLink href="/" label="Back to recipes" />{/if}
   {/key}
 </main>
 {#if appState.copy.footer_text}<footer>{appState.copy.footer_text}</footer>{/if}

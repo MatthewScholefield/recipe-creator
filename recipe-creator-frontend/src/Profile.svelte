@@ -5,6 +5,9 @@
   import IdentityPrompt from './IdentityPrompt.svelte';
   import Modal from './ui/Modal.svelte';
   import Spinner from './ui/Spinner.svelte';
+  import Button from './ui/Button.svelte';
+  import Icon from './ui/Icon.svelte';
+  import RecipeRow from './RecipeRow.svelte';
   import type { Device, Pairing, RecipeSummary } from './types';
   let { token = '', consumeToken }: {token?: string; consumeToken: () => void} = $props();
   const identity = $derived(appState.identity);
@@ -41,7 +44,7 @@
 <button onclick={() => section = 'profile'}>My profile</button>
 <button onclick={() => {section = 'profile'; void myRecipes();}}>My recipes</button>
 <button onclick={() => section = 'photos'}>My photo submissions</button>
-{#if identity.admin}<a href="/admin">Admin</a>{/if}
+{#if identity.admin}<Button variant="ghost" size="sm" href="/admin"><Icon name="shield-check" size={16} />Admin</Button>{/if}
 </nav>
 {#if section === 'profile'}<form onsubmit={(event) => {event.preventDefault(); void action(async () => {await mutate('/identity', {display_name: name.trim()}, 'PATCH'); await refresh(); notice = 'Public display name updated.';});}}>
 <label>Public display name<input bind:value={name} disabled={busy} required maxlength="80" autocomplete="nickname">
@@ -49,7 +52,7 @@
 <p class="help">Names are public and not verified.</p>
 <button disabled={busy}>Save name</button>
 </form>
-<section><h2>My recipes</h2>{#each recipes.filter(recipe => recipe.owner_id === identity?.user?.id) as recipe}<p><a href={`/recipes/${id(recipe.id)}`}>{recipe.title}</a></p>{/each}{#if !busy && !recipes.length}<p>No published recipes yet. <a href="/new">Add a recipe</a></p>{/if}{#if recipesMore}<button disabled={busy} onclick={() => myRecipes(true)}>Load more of my recipes</button>{/if}</section>
+<section><h2>My recipes</h2>{#if recipes.length}<div class="recipe-list">{#each recipes.filter(recipe => recipe.owner_id === identity?.user?.id) as recipe}<RecipeRow title={recipe.title} href={`/recipes/${id(recipe.id)}`} />{/each}</div>{:else if !busy}<p>No published recipes yet.</p><Button variant="primary" size="sm" href="/new"><Icon name="plus" size={18} />Add a recipe</Button>{/if}{#if recipesMore}<button disabled={busy} onclick={() => myRecipes(true)}>Load more of my recipes</button>{/if}</section>
 <details bind:open={devicesOpen}><summary>Devices</summary>
 <p>This browser remembers your profile without a password. Clearing browser data can lose access. Connect another device while you still have this one. Connected devices share this profile’s permissions, including admin access if granted.</p>
 <section>
@@ -88,3 +91,6 @@
 <p>{revokeDevice?.id === identity?.device_id ? 'This browser will lose access to your profile. If no other device is connected, you may be unable to recover it.' : 'This device will no longer be able to use your profile.'} Local drafts and saved recipes will not be deleted.</p>
 <button type="button" class="danger" disabled={busy} onclick={() => void action(async () => {if (!revokeDevice) return; const deviceId = revokeDevice.id; await mutate(`/devices/${id(deviceId)}`, undefined, 'DELETE'); revokeDevice = null; await refresh();})}>Revoke access</button><button type="button" disabled={busy} onclick={() => revokeDevice = null}>Cancel</button>
 </Modal>
+<style>
+  .recipe-list{display:grid;gap:.55rem}
+</style>

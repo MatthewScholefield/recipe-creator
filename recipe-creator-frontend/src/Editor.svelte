@@ -12,6 +12,8 @@
   import Tooltip from './ui/Tooltip.svelte';
   import Spinner from './ui/Spinner.svelte';
   import Icon from './ui/Icon.svelte';
+  import Button from './ui/Button.svelte';
+  import BackLink from './ui/BackLink.svelte';
   import type { Recipe, RecipeDraft, ParseResult, IngredientGroup, IngredientLinesResult, TagCatalog } from './types';
 
   let { recipeId, draftId, navigate }: {recipeId?: string; draftId?: string; navigate: (path: string, options?: {replace?: boolean}) => void} = $props();
@@ -240,10 +242,10 @@
   }
 </script>
 
-<a class="back" href={recipeId ? `/recipes/${id(recipeId)}` : '/'}>← Back</a>
+<BackLink href={recipeId ? `/recipes/${id(recipeId)}` : '/'} label={recipeId ? 'Back to recipe' : 'Back to recipes'} />
 <h1>{recipeId ? 'Edit recipe' : 'Add a recipe'}</h1>
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
-{#if conflict}<section class="notice" role="alert"><h2>A newer version exists</h2><p>Your local draft is safe. Compare the current recipe before starting a fresh edit.</p><a target="_blank" rel="noopener" href={`/recipes/${id(recipeId!)}`}>Compare current recipe</a></section>{/if}
+{#if conflict}<section class="notice" role="alert"><h2>A newer version exists</h2><p>Your local draft is safe. Compare the current recipe before starting a fresh edit.</p><Button variant="secondary" size="sm" href={`/recipes/${id(recipeId!)}`} target="_blank" rel="noopener"><Icon name="git-compare" size={16} />Compare current recipe</Button></section>{/if}
 {#if !ready && !error}<Spinner label="Opening the editor…" />
 {:else if ready && !allowed}<p>You can read this recipe, but only its owner or an administrator can edit it. Your local draft has been kept.</p>
 {:else if ready}
@@ -251,13 +253,13 @@
     <section aria-label="Your drafts">
       <button class="primary" onclick={startNew}><Icon name="plus" size={18} />Start a new recipe</button>
       {#if drafts.length}<h2>Your drafts <small>· On this device</small></h2>
-        <ul class="draft-list">{#each drafts as item (item.id)}<li><span><strong>{item.name}</strong><small>{new Date(item.updatedAt).toLocaleString()}</small></span><a href={draftHref(item.id)}>Resume<span class="sr-only"> {item.name}</span></a></li>{/each}</ul>
+        <ul class="draft-list">{#each drafts as item (item.id)}<li><span><strong>{item.name}</strong><small>{new Date(item.updatedAt).toLocaleString()}</small></span><Button variant="secondary" size="sm" href={draftHref(item.id)}><Icon name="edit" size={16} />Resume<span class="sr-only"> {item.name}</span></Button></li>{/each}</ul>
       {/if}
       {#if legacyAvailable}<p>An older draft also needs recovery. Your other drafts are unchanged.</p><button onclick={recoverOldNew}>Recover older draft as new</button>{/if}
     </section>
   {:else}
     {#if external}<section class="notice" role="alert"><h2>Changed in another tab</h2><p>Autosave is paused. Keep your copy as a new draft, or reload the stored version.</p><button onclick={reloadLocal}>Reload draft</button><button onclick={fork}>Save as new draft</button></section>{/if}
-    {#if activeId}<div class="toolbar draft-actions"><span class="draft-badge">Draft · {draftName}</span><button type="button" class="ghost" disabled={busy || external} onclick={() => naming = !naming}><Icon name="edit" size={16} />Rename</button><button type="button" class="ghost" disabled={busy} onclick={() => discard = !discard}><Icon name="trash" size={16} />Discard</button><a href="/new">Start another recipe</a></div>
+    {#if activeId}<div class="toolbar draft-actions"><span class="draft-badge">Draft · {draftName}</span><button type="button" class="ghost" disabled={busy || external} onclick={() => naming = !naming}><Icon name="edit" size={16} />Rename</button><button type="button" class="ghost" disabled={busy} onclick={() => discard = !discard}><Icon name="trash" size={16} />Discard</button><Button variant="ghost" size="sm" href="/new"><Icon name="plus" size={16} />Start another recipe</Button></div>
       {#if naming}<label>Draft name<input maxlength="120" bind:value={draftName} disabled={busy || external}></label><button onclick={() => { draftName = draftName.trim() || 'Untitled recipe'; flush(); naming = false; }}>Done</button>{/if}
       {#if discard}<section class="notice"><p>Discard “{draftName}” from this device?</p><button onclick={discardDraft}>Discard draft</button><button onclick={() => discard = false}>Keep draft</button></section>{/if}
     {/if}

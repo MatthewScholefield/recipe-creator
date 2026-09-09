@@ -1,16 +1,18 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
-  import { message, request } from './api';
+  import { request, message } from './api';
   import { load, save } from './local';
-  import { browseUrl, bookmarkIds, mealGroup, MEAL_CLASSIFIERS, uniqueTags } from './browse-query';
-  import TagPicker from './ui/TagPicker.svelte';
+  import { bookmarkIds, browseUrl, mealGroup, MEAL_CLASSIFIERS, uniqueTags } from './browse-query';
+  import { appState } from './app-state.svelte';
+  import { draftHref, listDrafts, subscribeDrafts, type DraftSummary } from './drafts';
   import Tag from './ui/Tag.svelte';
+  import TagPicker from './ui/TagPicker.svelte';
   import Icon from './ui/Icon.svelte';
+  import Button from './ui/Button.svelte';
+  import IconButton from './ui/IconButton.svelte';
   import Spinner from './ui/Spinner.svelte';
   import RecipeCard from './RecipeCard.svelte';
   import type { RecipeSummary } from './types';
-  import { listDrafts, subscribeDrafts, draftHref, type DraftSummary } from './drafts';
-  import { appState } from './app-state.svelte';
 
   type TagCatalog = {tags: string[]; classifier_tags?: string[]};
   type ListResult = {items: RecipeSummary[]; has_more: boolean; errors?: string[]};
@@ -131,7 +133,7 @@
 
 <div class="page-heading">
   <div><p class="eyebrow">Recipes</p><h1>{savedOnly ? 'Saved recipes' : active ? 'Results' : appState.copy.home_title}</h1>{#if !savedOnly && !active && appState.copy.home_intro}<p>{appState.copy.home_intro}</p>{/if}</div>
-  {#if !savedOnly}<a class="bookmark-link" href={browseUrl({q: query, tags: selected, saved: true})} aria-label="Saved recipes"><Icon name="bookmark" size={18} /></a>{/if}
+  {#if !savedOnly}<IconButton href={browseUrl({q: query, tags: selected, saved: true})} ariaLabel="Saved recipes" title="Saved recipes"><Icon name="bookmark" size={18} /></IconButton>{/if}
 </div>
 
 {#if !savedOnly && drafts.length}<section class="drafts" aria-labelledby="drafts-heading"><div><p class="eyebrow">On this device</p><h2 id="drafts-heading">Your drafts</h2></div><div class="cards">{#each drafts as draft (draft.id)}<RecipeCard title={draft.name} href={draftHref(draft.id)} isDraft updatedAt={draft.updatedAt} />{/each}</div></section>{/if}
@@ -146,10 +148,10 @@
 {#if savedOnly && busy}<p role="status"><Spinner size={16} /> Loading saved recipes ({savedProgress.done} of {savedProgress.total})…</p>{/if}
 
 {#each groups as group}{#if group.items.length}<section class="recipe-group"><h2>{group.name}</h2><div class="cards">{#each group.items as recipe (recipe.id)}<RecipeCard title={recipe.title} href={`/recipes/${encodeURIComponent(recipe.id)}`} description={recipe.description} thumbnailPhotoId={recipe.thumbnail_photo_id} />{/each}</div></section>{/if}{/each}
-{#if busy && !savedOnly}<p role="status"><Spinner size={16} /> Loading recipes…</p>{:else if !visible.length && !busy && !error}<div class="empty"><h2>{savedOnly ? 'No saved recipes' : active ? 'No matching recipes' : 'No recipes yet'}</h2><p>{savedOnly ? 'Save recipes to this device to find them here.' : active ? 'Try a different search or filter.' : 'Add the first recipe when you are ready.'}</p>{#if active}<button type="button" onclick={clearFilters}>Clear filters</button>{:else if !savedOnly}<a href="/new">Add recipe</a>{/if}</div>{/if}
+{#if busy && !savedOnly}<p role="status"><Spinner size={16} /> Loading recipes…</p>{:else if !visible.length && !busy && !error}<div class="empty"><h2>{savedOnly ? 'No saved recipes' : active ? 'No matching recipes' : 'No recipes yet'}</h2><p>{savedOnly ? 'Save recipes to this device to find them here.' : active ? 'Try a different search or filter.' : 'Add the first recipe when you are ready.'}</p>{#if active}<button type="button" onclick={clearFilters}>Clear filters</button>{:else if !savedOnly}<Button variant="primary" size="sm" href="/new"><Icon name="plus" size={18} /> Add recipe</Button>{/if}</div>{/if}
 {#if savedOnly && failedBatches.length}<p class="notice" role="status">Some saved recipes could not be loaded. <button type="button" onclick={() => void loadSaved(failedBatches)}>Retry failed requests</button></p>{/if}
 {#if more && !savedOnly}<button class="load-more" disabled={busy} onclick={() => void fetchPage()}>Load more recipes</button>{/if}
 
 <style>
-  .page-heading,.drafts,.tag-filters,.active-filters{display:flex;gap:1rem;align-items:center;justify-content:space-between}.bookmark-link{display:inline-flex;align-items:center;gap:.35rem}.drafts,.tag-filters,.active-filters{margin:1rem 0;align-items:flex-start}.drafts{display:block}.drafts .cards{grid-template-columns:repeat(auto-fill,minmax(min(100%,20rem),1fr))}.quick-tags,.active-filters{display:flex;gap:.4rem;flex-wrap:wrap}.active-filters{justify-content:flex-start;align-items:center}.tag-filters{justify-content:flex-start;flex-wrap:wrap;align-items:center;gap:.5rem}.quick-tags{flex:0 1 auto;min-width:0;overflow:hidden;white-space:nowrap;flex-wrap:nowrap}.quick-tags :global(.tag){flex:none}.tag-filters :global(.tag-picker){flex:0 1 auto;max-width:100%}.recipe-group{margin:1.5rem 0}
+  .page-heading,.drafts,.tag-filters,.active-filters{display:flex;gap:1rem;align-items:center;justify-content:space-between}.drafts,.tag-filters,.active-filters{margin:1rem 0;align-items:flex-start}.drafts{display:block}.drafts .cards{grid-template-columns:repeat(auto-fill,minmax(min(100%,20rem),1fr))}.quick-tags,.active-filters{display:flex;gap:.4rem;flex-wrap:wrap}.active-filters{justify-content:flex-start;align-items:center}.tag-filters{justify-content:flex-start;flex-wrap:wrap;align-items:center;gap:.5rem}.quick-tags{flex:0 1 auto;min-width:0;overflow:hidden;white-space:nowrap;flex-wrap:nowrap}.quick-tags :global(.tag){flex:none}.tag-filters :global(.tag-picker){flex:0 1 auto;max-width:100%}.recipe-group{margin:1.5rem 0}
 </style>
