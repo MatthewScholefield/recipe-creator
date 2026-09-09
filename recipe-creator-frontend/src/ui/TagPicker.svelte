@@ -53,7 +53,7 @@
     </div>
     {#if expanded && (matches.length || canCreate)}
       <ul id={`${listId}-options`} role="listbox" aria-label={`${label} options`}>
-        {#each matches as tag, index}<li id={`${listId}-option-${index}`} role="option" aria-selected={activeIndex === index}><button type="button" onclick={() => choose(tag)}><Icon name="check" size={15} />{tag}</button></li>{/each}
+        {#each matches as tag, index}<li id={`${listId}-option-${index}`} role="option" aria-selected={activeIndex === index}><button type="button" onclick={() => choose(tag)}>{tag}</button></li>{/each}
         {#if canCreate}<li id={`${listId}-option-${matches.length}`} role="option" aria-selected={activeIndex === matches.length}><button type="button" onclick={() => choose(createValue)}><Icon name="plus" size={15} />Create “{createValue}”</button></li>{/if}
       </ul>
     {/if}
@@ -67,8 +67,11 @@
   .tag-control.expanded,.tag-control:focus-within{border-color:var(--ui-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--ui-accent) 20%,transparent)}
   .tag-chips{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;padding:.5rem .6rem}
   .tag-chips input{min-width:0;width:9rem;flex:1 1 9rem;margin:0;border:0;outline:0;background:transparent;padding:.2rem;color:var(--ui-text);box-shadow:none}
-  ul{position:absolute;top:100%;left:0;right:0;z-index:20;list-style:none;margin:.2rem 0 0;padding:.25rem;max-height:15rem;overflow:auto;border:1px solid var(--ui-control-border);border-radius:.5rem;background:var(--ui-surface);box-shadow:0 4px 12px #0002}
+  .compact .tag-control{border-radius:999px}
+  .compact .tag-chips{flex-wrap:nowrap;padding:0 .55rem}
+  .compact .tag-chips input{width:7rem;flex:0 1 7rem;height:1.5rem;padding:0;font-size:.88rem;line-height:1.3}
+  ul{position:absolute;top:calc(100% + .3rem);left:0;z-index:20;width:max-content;min-width:100%;max-width:min(20rem,calc(100vw - 2rem));list-style:none;margin:0;padding:.2rem;max-height:15rem;overflow:auto;border:1px solid var(--ui-control-border);border-radius:.45rem;background:var(--ui-surface);box-shadow:0 6px 16px #0002}
   li{margin:0;padding:0}
-  li button{display:flex;align-items:center;gap:.4rem;width:100%;margin:0;padding:.5rem .6rem;border:0;border-radius:.3rem;background:transparent;color:var(--ui-text);text-align:left;font:inherit;cursor:pointer}
+  li button{display:flex;align-items:center;gap:.3rem;width:100%;min-height:1.65rem;margin:0;padding:.25rem .5rem;border:0;border-radius:.3rem;background:transparent;color:var(--ui-text);text-align:left;font:inherit;font-size:.88rem;line-height:1.3;cursor:pointer}
   li[aria-selected='true'] button,li button:hover{background:var(--ui-tag)}
 </style>
