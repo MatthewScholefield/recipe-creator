@@ -21,7 +21,7 @@ it('keeps secondary actions subtle and confirms recipe deletion in a modal', asy
   expect(screen.getByRole('button',{name:'Save for later'})).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Save for later'}).querySelector('svg')).toHaveAttribute('fill','none');
   await fireEvent.click(screen.getByRole('button',{name:'Save for later'}));
-  expect(screen.getByRole('button',{name:'Remove saved recipe'}).querySelector('svg')).toHaveAttribute('fill','currentColor');
+  expect(screen.getByRole('button',{name:'Remove saved recipe'}).querySelector('svg')).toHaveAttribute('fill','var(--ui-accent)');
   expect(screen.getByRole('button',{name:'Delete recipe'})).toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Delete recipe'}));
   expect(screen.getByRole('dialog')).toHaveTextContent('Delete recipe');
