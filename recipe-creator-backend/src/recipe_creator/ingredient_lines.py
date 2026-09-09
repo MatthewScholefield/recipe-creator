@@ -1,5 +1,4 @@
 """Ingredient preview: deterministic first, one source-span-only batch fallback."""
-import re
 
 from logly import logger
 from pydantic import ValidationError
@@ -28,15 +27,10 @@ def materialize_line(text, row):
         values[field] = text[span.start:span.end]
     spans.sort()
     end = 0
-    gaps = []
     for start, stop in spans:
         if start < end:
             raise ValueError('Overlapping source spans')
-        gaps.append(text[end:start])
         end = stop
-    gaps.append(text[end:])
-    if any(re.sub(r'\bto\b|[\s,–—-]', '', gap) for gap in gaps):
-        raise ValueError('Unaccounted source text')
     if not values['name'] or not values['name'].strip():
         raise ValueError('Missing ingredient name')
     for field in ('quantity', 'quantity_max'):

@@ -96,6 +96,18 @@ async def test_valid_source_spans_preserve_exact_text(monkeypatch):
     assert result.items[0].ingredient.quantity is None and result.items[0].ingredient.grams is None
 
 
+async def test_unaccounted_source_is_allowed(monkeypatch):
+    text = '1/0 cups flour'
+    output = {'items': [{'id': 'row', 'name': {'start': 9, 'end': 14}}]}
+    monkeypatch.setattr(ai, 'parse_ingredient_lines_batch', AsyncMock(return_value=output))
+    result = await parse_ingredient_lines(
+        [{'id': 'row', 'text': text}], Settings(), reserve_fallback=AsyncMock()
+    )
+    assert result.items[0].method == 'llm'
+    assert result.items[0].ingredient.name == 'flour'
+    assert result.items[0].ingredient.original_text == text
+
+
 async def test_timeout_and_quota(monkeypatch):
     fallback = AsyncMock(side_effect=TimeoutError('provider'))
     monkeypatch.setattr(ai, 'parse_ingredient_lines_batch', fallback)
