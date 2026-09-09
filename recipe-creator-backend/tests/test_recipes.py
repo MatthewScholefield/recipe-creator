@@ -16,7 +16,7 @@ from recipe_creator import ai, recipes
 from recipe_creator.ingredients import ingredient_hash
 from recipe_creator.photos import PhotoService
 from recipe_creator.repository import ConflictError, Repository
-from recipe_creator.schemas import RecipeDraft
+from recipe_creator.schemas import RecipeCatalogProjection, RecipeDraft
 from recipe_creator.security import ADMIN_COOKIE, DEVICE_COOKIE, digest, now
 from recipe_creator.settings import Settings
 
@@ -57,6 +57,14 @@ def test_exact_strings_bounds_and_untrusted_estimates():
 def test_search_prototype_semantics():
     assert recipes.search_terms(" Red  soup tag:dinner -tag:lunch -incomplete", {"dinner", "lunch"}) == ("red soup", ["dinner", "lunch"], [])
     assert recipes.search_terms("foo:x tag:missing tag:", set()) == ("", [], ["Unknown search fields: foo", "Tags not found: missing"])
+
+
+def test_catalog_projection_is_strict_and_normalizes_record_ids():
+    row = RecipeCatalogProjection.model_validate({"id": "recipes:soup", "title": "Soup", "description": "",
+                                                   "tags": ["dinner"], "owner_id": "users:alice", "author_name": "Alice"})
+    assert row.id == "soup" and row.owner_id == "alice"
+    with pytest.raises(ValidationError):
+        RecipeCatalogProjection.model_validate({**row.model_dump(), "unexpected": True})
 
 
 @pytest_asyncio.fixture
@@ -139,9 +147,9 @@ async def test_search_projection_pagination_and_cache(app, monkeypatch):
             assert (await browser.post("/recipes", json=value)).status_code == 201
         calls = []
         project = recipes._project
-        async def spy(repository, fields, condition=None):
-            calls.append(fields)
-            return await project(repository, fields, condition)
+        async def spy(repository, fields, row_model, condition=None):
+            calls.append((fields, row_model))
+            return await project(repository, fields, row_model, condition)
         monkeypatch.setattr(recipes, "_project", spy)
         response = await browser.get("/recipes?limit=2")
         assert response.status_code == 200, response.text
@@ -154,7 +162,7 @@ async def test_search_projection_pagination_and_cache(app, monkeypatch):
         assert len(calls) == 1
         result = (await browser.get("/recipes", params={"q": "red soup tag:lunch -tag:dinner"})).json()
         assert [item["title"] for item in result["items"]] == ["Apple"]
-        assert calls[-1] == ("id",)
+        assert calls[-1][0] == ("id",)
         result = (await browser.get("/recipes", params={"q": "tag:absent owner:x"})).json()
         assert len(result["errors"]) == 2
         assert (await browser.get("/recipes", params={"q": "$x); DELETE recipes;"})).status_code == 200

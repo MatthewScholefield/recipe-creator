@@ -280,6 +280,29 @@ class SiteSettingsUpdate(StrictDTO):
     site_copy: SiteCopy = Field(alias='copy')
 
 
+class RecipeCatalogProjection(StrictDTO):
+    id: Identifier
+    title: str
+    description: str
+    tags: list[str]
+    owner_id: str | None
+    author_name: str | None
+
+    @field_validator("id", "owner_id", mode="before")
+    @classmethod
+    def bare_record_id(cls, value):
+        return str(value).partition(":")[2] or str(value) if value is not None else None
+
+
+class RecipeIdProjection(StrictDTO):
+    id: Identifier
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def bare_record_id(cls, value):
+        return str(value).partition(":")[2] or str(value)
+
+
 class RecipeSummary(BaseModel):
     thumbnail_photo_id: str | None = None
     id: str

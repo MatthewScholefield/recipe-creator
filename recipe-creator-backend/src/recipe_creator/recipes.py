@@ -17,9 +17,10 @@ from .jobs import enqueue_enrichment, enrichment_hash
 from .models import EnrichmentJob, Photo, Recipe as RecipeModel, User
 from .photos import PUBLIC_FIELDS
 from surreal_sdk.protocol.cbor import RecordId
-from .schemas import (ParseRequest, ParseResult, Recipe, RecipeDraft, RecipeUpdate, MEAL_CLASSIFIERS,
-                      tag_key, RecipeListResponse, TagCatalog, Tag, RecipeLookupRequest, RecipeLookupResponse,
-                      IngredientLinesRequest, IngredientLinesResult)
+from .schemas import (ParseRequest, ParseResult, Recipe, RecipeCatalogProjection, RecipeDraft,
+                      RecipeIdProjection, RecipeUpdate, MEAL_CLASSIFIERS, tag_key, RecipeListResponse, TagCatalog,
+                      Tag, RecipeLookupRequest, RecipeLookupResponse, IngredientLinesRequest, IngredientLinesResult)
+
 from .security import authorize, client_ip, get_context, now, rate_limit, require_user, retry_transaction
 
 
@@ -69,7 +70,7 @@ def search_terms(query, known_tags):
     return " ".join(words).lower(), tags, errors
 
 
-async def _project(repo, fields, condition=None):
+async def _project(repo, fields, row_model, condition=None):
     await repo.connect()
     rows, offset = [], 0
     async with Connections.using(repo._name):
@@ -79,7 +80,7 @@ async def _project(repo, fields, condition=None):
                 query.filter(condition)
             query = query.order_by("id").offset(offset).limit(1000)
             page = await query._execute_query(query._compile_query())
-            rows.extend(page)
+            rows.extend(row_model.model_validate(row) for row in page)
             if len(page) < 1000:
                 return rows
             offset += len(page)
@@ -97,11 +98,8 @@ async def _catalog(repo):
         cached = getattr(repo, "_recipe_catalog", None)
         if cached and cached[0] > monotonic():
             return cached[1]
-        rows = await _project(repo, SUMMARY_FIELDS)
-        summaries = [{"id": _id(row["id"], "recipes"), "title": row.get("title", ""),
-                      "description": row.get("description", ""), "tags": row.get("tags", []),
-                      "owner_id": _id(row.get("owner_id"), "users"), "author_name": row.get("author_name")}
-                     for row in rows]
+        rows = await _project(repo, SUMMARY_FIELDS, RecipeCatalogProjection)
+        summaries = [row.model_dump() for row in rows]
         order = {name: index for index, name in enumerate((*CATEGORIES, "Other"))}
         summaries.sort(key=lambda item: (order[_group(item)], item["title"].lower(), item["id"]))
         repo._recipe_catalog = (monotonic() + 15, summaries)
@@ -116,8 +114,8 @@ async def _text_matches(repo, text):
         return cached[1]
     pattern = "(?i)" + re.escape(text)
     condition = Q(title__regex=pattern) | Q(description__regex=pattern) | Q(**{"payload.directions__regex": pattern})
-    rows = await _project(repo, ("id",), condition)
-    ids = {_id(row["id"], "recipes") for row in rows}
+    rows = await _project(repo, ("id",), RecipeIdProjection, condition)
+    ids = {row.id for row in rows}
     if len(cache) >= 128:
         cache.pop(next(iter(cache)))
     cache[text] = (monotonic() + 15, ids)
