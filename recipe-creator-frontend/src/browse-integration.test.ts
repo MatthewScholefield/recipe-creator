@@ -61,9 +61,12 @@ it('binds live home copy and same-tab draft updates without treating drafts as p
   const draft = createDraft('First local draft');
   mockApi(() => ({items: [], has_more: false}));
   const component = render(Browse, {query: ''});
-  await screen.findByRole('heading', {name: 'First local draft'});
-  expect(screen.getByRole('link', {name: 'Resume'})).toHaveAttribute('href', draftHref(draft.id));
-  expect(screen.getByRole('region', {name: 'Your drafts'}).querySelector('img')).toBeNull();
+  const draftTitle = await screen.findByRole('link', {name: 'First local draft'});
+  expect(draftTitle).toHaveAttribute('href', draftHref(draft.id));
+  const draftRegion = screen.getByRole('region', {name: 'Your drafts'});
+  expect(draftRegion.querySelector('.card')).toHaveClass('draft');
+  expect(draftRegion.querySelector('time')).toHaveAttribute('datetime', draft.updatedAt);
+  expect(draftRegion.querySelector('img')).toBeNull();
   renameDraft(draft.id, 'Renamed local draft');
   await screen.findByRole('heading', {name: 'Renamed local draft'});
   setSiteCopy({...DEFAULT_SITE_COPY, home_title: '<em>Neighbors</em>', home_intro: 'Fresh home introduction'});

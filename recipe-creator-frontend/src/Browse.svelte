@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
-  import { message, photoUrl, request } from './api';
+  import { message, request } from './api';
   import { load, save } from './local';
   import { browseUrl, bookmarkIds, mealGroup, MEAL_CLASSIFIERS, uniqueTags } from './browse-query';
   import TagPicker from './ui/TagPicker.svelte';
   import Tag from './ui/Tag.svelte';
   import Icon from './ui/Icon.svelte';
   import Spinner from './ui/Spinner.svelte';
+  import RecipeCard from './RecipeCard.svelte';
   import type { RecipeSummary } from './types';
   import { listDrafts, subscribeDrafts, draftHref, type DraftSummary } from './drafts';
   import { appState } from './app-state.svelte';
@@ -133,7 +134,7 @@
   {#if !savedOnly}<a class="bookmark-link" href={browseUrl({q: query, tags: selected, saved: true})} aria-label="Saved recipes"><Icon name="bookmark" size={18} /></a>{/if}
 </div>
 
-{#if !savedOnly && drafts.length}<section class="drafts" aria-labelledby="drafts-heading"><div><p class="eyebrow">On this device</p><h2 id="drafts-heading">Your drafts</h2></div><div class="draft-cards">{#each drafts as draft (draft.id)}<article class="draft-card"><span class="draft-badge">Draft</span><h3>{draft.name}</h3><p>Updated {new Date(draft.updatedAt).toLocaleDateString()}</p><a href={draftHref(draft.id)}>Resume</a></article>{/each}</div></section>{/if}
+{#if !savedOnly && drafts.length}<section class="drafts" aria-labelledby="drafts-heading"><div><p class="eyebrow">On this device</p><h2 id="drafts-heading">Your drafts</h2></div><div class="cards">{#each drafts as draft (draft.id)}<RecipeCard title={draft.name} href={draftHref(draft.id)} isDraft updatedAt={draft.updatedAt} />{/each}</div></section>{/if}
 
 <section class="tag-filters" aria-label="Recipe filters"><div class="quick-tags" use:clipQuickTags={quickTags}>{#each quickTags as tag}<Tag label={tag} href={link([...selected, tag])} />{/each}</div><TagPicker tags={tags} selected={selected} label="Search tags" placeholder="Search tags" compact allowCreate={false} onchange={setTags} />{#if tagError}<p class="notice" role="status">{tagError}</p>{/if}</section>
 
@@ -144,11 +145,11 @@
 {#if savedOnly && (invalidBookmarks || unavailable.length)}<div class="notice" role="status">{#if invalidBookmarks}{invalidBookmarks} invalid bookmark{invalidBookmarks === 1 ? '' : 's'} could not be loaded. {/if}{#if unavailable.length}{unavailable.length} saved recipe{unavailable.length === 1 ? ' is' : 's are'} unavailable. <button type="button" onclick={removeUnavailable}>Remove unavailable</button>{/if}</div>{/if}
 {#if savedOnly && busy}<p role="status"><Spinner size={16} /> Loading saved recipes ({savedProgress.done} of {savedProgress.total})…</p>{/if}
 
-{#each groups as group}{#if group.items.length}<section class="recipe-group"><h2>{group.name}</h2><div class="cards">{#each group.items as recipe (recipe.id)}<article class="card">{#if recipe.thumbnail_photo_id}<img src={photoUrl(recipe.thumbnail_photo_id, true)} alt="" width="96" height="96" loading="lazy">{/if}<h3><a href={`/recipes/${encodeURIComponent(recipe.id)}`}>{recipe.title}</a></h3>{#if recipe.description}<p class="excerpt">{recipe.description}</p>{/if}</article>{/each}</div></section>{/if}{/each}
+{#each groups as group}{#if group.items.length}<section class="recipe-group"><h2>{group.name}</h2><div class="cards">{#each group.items as recipe (recipe.id)}<RecipeCard title={recipe.title} href={`/recipes/${encodeURIComponent(recipe.id)}`} description={recipe.description} thumbnailPhotoId={recipe.thumbnail_photo_id} />{/each}</div></section>{/if}{/each}
 {#if busy && !savedOnly}<p role="status"><Spinner size={16} /> Loading recipes…</p>{:else if !visible.length && !busy && !error}<div class="empty"><h2>{savedOnly ? 'No saved recipes' : active ? 'No matching recipes' : 'No recipes yet'}</h2><p>{savedOnly ? 'Save recipes to this device to find them here.' : active ? 'Try a different search or filter.' : 'Add the first recipe when you are ready.'}</p>{#if active}<button type="button" onclick={clearFilters}>Clear filters</button>{:else if !savedOnly}<a href="/new">Add recipe</a>{/if}</div>{/if}
 {#if savedOnly && failedBatches.length}<p class="notice" role="status">Some saved recipes could not be loaded. <button type="button" onclick={() => void loadSaved(failedBatches)}>Retry failed requests</button></p>{/if}
 {#if more && !savedOnly}<button class="load-more" disabled={busy} onclick={() => void fetchPage()}>Load more recipes</button>{/if}
 
 <style>
-  .page-heading,.drafts,.tag-filters,.active-filters{display:flex;gap:1rem;align-items:center;justify-content:space-between}.bookmark-link{display:inline-flex;align-items:center;gap:.35rem}.drafts,.tag-filters,.active-filters{margin:1rem 0;align-items:flex-start}.drafts{display:block}.draft-cards{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))}.draft-card{border:1px solid var(--ui-control-border);border-radius:.5rem;padding:.8rem}.draft-card h3{margin:.35rem 0}.draft-card p{margin:.35rem 0;color:var(--ui-muted)}.draft-badge{display:inline-flex;align-items:center;gap:.25rem;border-radius:999px;padding:.15rem .5rem;background:var(--ui-surface-muted)}.quick-tags,.active-filters{display:flex;gap:.4rem;flex-wrap:wrap}.active-filters{justify-content:flex-start;align-items:center}.tag-filters{justify-content:flex-start;flex-wrap:wrap;align-items:center;gap:.5rem}.quick-tags{flex:0 1 auto;min-width:0;overflow:hidden;white-space:nowrap;flex-wrap:nowrap}.quick-tags :global(.tag){flex:none}.tag-filters :global(.tag-picker){flex:0 1 auto;max-width:100%}.recipe-group{margin:1.5rem 0}.card{position:relative}.card img{float:right;object-fit:cover;border-radius:.35rem;margin-left:.75rem}.excerpt{color:var(--ui-muted)}
+  .page-heading,.drafts,.tag-filters,.active-filters{display:flex;gap:1rem;align-items:center;justify-content:space-between}.bookmark-link{display:inline-flex;align-items:center;gap:.35rem}.drafts,.tag-filters,.active-filters{margin:1rem 0;align-items:flex-start}.drafts{display:block}.quick-tags,.active-filters{display:flex;gap:.4rem;flex-wrap:wrap}.active-filters{justify-content:flex-start;align-items:center}.tag-filters{justify-content:flex-start;flex-wrap:wrap;align-items:center;gap:.5rem}.quick-tags{flex:0 1 auto;min-width:0;overflow:hidden;white-space:nowrap;flex-wrap:nowrap}.quick-tags :global(.tag){flex:none}.tag-filters :global(.tag-picker){flex:0 1 auto;max-width:100%}.recipe-group{margin:1.5rem 0}
 </style>
