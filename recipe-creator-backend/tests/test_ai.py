@@ -4,8 +4,8 @@ import json
 import pytest
 from pydantic import ValidationError
 from pydantic_ai import models
-from pydantic_ai.messages import ModelResponse, ToolCallPart, UserPromptPart
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.messages import ModelResponse, ThinkingPart, ToolCallPart, UserPromptPart
+from pydantic_ai.models.function import DeltaToolCall, DeltaThinkingPart, FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from recipe_creator.ai import ParseRequest, parse_recipe, parser_agent, source_hash
@@ -26,6 +26,26 @@ def output(**kwargs):
         "unclassified": "",
         **kwargs,
     }
+
+
+def streaming_model(function):
+    async def stream(messages, info):
+        response = await function(messages, info)
+        for index, part in enumerate(response.parts):
+            if isinstance(part, ThinkingPart):
+                yield {index: DeltaThinkingPart(content=part.content)}
+            elif isinstance(part, ToolCallPart):
+                yield {
+                    index: DeltaToolCall(
+                        name=part.tool_name,
+                        json_args=part.args_as_json_str(),
+                        tool_call_id=part.tool_call_id,
+                    )
+                }
+            else:
+                raise AssertionError(f"Unsupported streamed test part: {part!r}")
+
+    return FunctionModel(function, stream_function=stream)
 
 
 def test_request_rejects_identity():
@@ -153,7 +173,7 @@ async def test_only_source_sent_and_validation_retries():
             ]
         )
 
-    with parser_agent.override(model=FunctionModel(respond)):
+    with parser_agent.override(model=streaming_model(respond)):
         result = await parse_recipe(
             source, Settings(db_user="private-name", ai_api_key="private-key")
         )
@@ -173,10 +193,26 @@ async def test_only_source_sent_and_validation_retries():
             ]
         )
 
-    with parser_agent.override(model=FunctionModel(invalid)):
+    with parser_agent.override(model=streaming_model(invalid)):
         with pytest.raises(UnexpectedModelBehavior):
             await parse_recipe(source, Settings())
     assert len(failed_calls) == 2
+
+
+async def test_parser_prints_live_thinking(capsys):
+    source = "Mix now."
+
+    async def respond(messages, info):
+        return ModelResponse(
+            parts=[
+                ThinkingPart("considering the recipe"),
+                ToolCallPart(info.output_tools[0].name, output(directions=source)),
+            ]
+        )
+
+    with parser_agent.override(model=streaming_model(respond)):
+        await parse_recipe(source, Settings())
+    assert capsys.readouterr().out == "THOUGHTS: considering the recipe"
 
 
 async def test_timeout_and_concurrency():
@@ -194,7 +230,7 @@ async def test_timeout_and_concurrency():
         finally:
             active -= 1
 
-    with parser_agent.override(model=FunctionModel(respond)):
+    with parser_agent.override(model=streaming_model(respond)):
         await asyncio.gather(
             *(parse_recipe("x", Settings(ai_concurrency=1)) for _ in range(3))
         )

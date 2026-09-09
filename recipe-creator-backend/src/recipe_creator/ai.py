@@ -11,10 +11,15 @@ from weakref import WeakKeyDictionary
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import (
     Agent,
+    AgentRunResultEvent,
     ModelRetry,
+    PartDeltaEvent,
     RunContext,
+    ThinkingPart,
+    ThinkingPartDelta,
     ToolOutput,
 )
+from pydantic_ai.messages import PartStartEvent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.usage import UsageLimits
@@ -110,7 +115,7 @@ async def parse_recipe(source_text: str, settings: Settings) -> dict:
     model, semaphore = _runtime(settings)
     async with asyncio.timeout(settings.ai_timeout_seconds):
         async with semaphore:
-            result = await parser_agent.run(
+            async with parser_agent.run_stream_events(
                 json.dumps(request.model_dump(), ensure_ascii=False),
                 model=model,
                 model_settings={
@@ -118,7 +123,19 @@ async def parse_recipe(source_text: str, settings: Settings) -> dict:
                     "max_tokens": 16000,
                 },
                 usage_limits=UsageLimits(request_limit=2),
-            )
+            ) as events:
+                async for event in events:
+                    if isinstance(event, PartStartEvent) and isinstance(
+                        event.part, ThinkingPart
+                    ):
+                        print("THOUGHTS:", event.part.content, end="", flush=True)
+                    elif isinstance(event, PartDeltaEvent) and isinstance(
+                        event.delta, ThinkingPartDelta
+                    ):
+                        print(event.delta.content_delta, end="", flush=True)
+                    if isinstance(event, AgentRunResultEvent):
+                        result = event.result
+                        break
     return {
         **result.output.model_dump(),
         "source_hash": source_hash(source_text),
