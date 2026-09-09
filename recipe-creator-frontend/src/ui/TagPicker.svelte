@@ -70,8 +70,8 @@
   .compact .tag-control{border-radius:999px}
   .compact .tag-chips{flex-wrap:nowrap;padding:0 .55rem}
   .compact .tag-chips input{width:7rem;flex:0 1 7rem;height:1.5rem;padding:0;font-size:.88rem;line-height:1.3}
-  ul{position:absolute;top:calc(100% + .3rem);left:0;z-index:20;width:max-content;min-width:100%;max-width:min(20rem,calc(100vw - 2rem));list-style:none;margin:0;padding:.2rem;max-height:15rem;overflow:auto;border:1px solid var(--ui-control-border);border-radius:18px;background:var(--ui-surface);box-shadow:0 6px 16px #0002}
+  ul{position:absolute;top:calc(100% + .3rem);left:0;z-index:20;width:max-content;min-width:100%;max-width:min(20rem,calc(100vw - 2rem));list-style:none;margin:0;padding:.2rem;max-height:15rem;overflow:auto;border:1px solid var(--ui-control-border);border-radius:16.5px;background:var(--ui-surface);box-shadow:0 6px 16px #0002}
   li{margin:0;padding:0}
-  li button{display:flex;align-items:center;gap:.3rem;width:100%;min-height:1.65rem;margin:0;padding:.25rem .5rem;border:0;border-radius:18px;background:transparent;color:var(--ui-text);text-align:left;font:inherit;font-size:.88rem;line-height:1.3;cursor:pointer}
+  li button{display:flex;align-items:center;gap:.3rem;width:100%;min-height:1.65rem;margin:0;padding:.25rem .5rem;border:0;border-radius:16.5px;background:transparent;color:var(--ui-text);text-align:left;font:inherit;font-size:.88rem;line-height:1.3;cursor:pointer}
   li[aria-selected='true'] button,li button:hover{background:var(--ui-tag)}
 </style>
