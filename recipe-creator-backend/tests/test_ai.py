@@ -129,22 +129,31 @@ async def test_ingredient_batch_one_request_no_transport_retries(monkeypatch):
     assert calls == [1]
 
 
-async def test_tool_output_without_network():
-    source = "250 g flour"
-    with parser_agent.override(
-        model=TestModel(
-            custom_output_args=output(
-                ingredient_groups=[
-                    {
-                        "name": "",
-                        "ingredients": [{"original_text": source}],
-                    }
-                ]
-            )
-        )
-    ):
+async def test_ingredient_groups_require_labels_then_mask_a_lone_generic_label():
+    source = (
+        "0=== =====Start GF Flour ==== ===\n"
+        "115.5 g White Rice Flour\n"
+        "0=== =====End GF Flour ===== ==="
+    )
+    calls = []
+
+    async def respond(_messages, info):
+        calls.append(1)
+        name = "" if len(calls) == 1 else "Ingredients"
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, output(
+            ingredient_groups=[{
+                "name": name,
+                "ingredients": [{"original_text": "115.5 g White Rice Flour"}],
+            }],
+        ))])
+
+    with parser_agent.override(model=streaming_model(respond)):
         result = await parse_recipe(source, Settings())
-    assert result["ingredient_groups"][0]["ingredients"][0]["original_text"] == source
+    assert calls == [1, 1]
+    assert result["ingredient_groups"] == [{
+        "name": "",
+        "ingredients": [{"original_text": "115.5 g White Rice Flour"}],
+    }]
 
 
 async def test_only_source_sent_and_validation_retries():
