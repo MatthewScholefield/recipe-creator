@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import Icon from './Icon.svelte';
+  import Tag from './Tag.svelte';
 
   interface Props {
     tags: string[];
@@ -7,13 +9,21 @@
     label?: string;
     placeholder?: string;
     single?: boolean;
+    compact?: boolean;
     allowCreate?: boolean;
     onchange?: (tags: string[]) => void;
   }
-  let { tags, selected = $bindable([]), label = 'Tags', placeholder = 'Search tags', single = false, allowCreate = true, onchange }: Props = $props();
+  let { tags, selected = $bindable([]), label = 'Tags', placeholder = 'Search tags', single = false, compact = false, allowCreate = true, onchange }: Props = $props();
   let query = $state('');
   let expanded = $state(false);
-  let input: HTMLInputElement;
+  let input = $state<HTMLInputElement>();
+  let picker = $state<HTMLDivElement>();
+  async function open() { expanded = true; await tick(); input?.focus(); }
+  async function collapse(restoreFocus = false) {
+    expanded = false;
+    if (compact) query = '';
+    if (compact && restoreFocus) { await tick(); picker?.querySelector('button')?.focus(); }
+  }
   let activeIndex = $state(0);
   const listId = `tags-${Math.random().toString(36).slice(2)}`;
   let normalized = $derived(query.trim().toLocaleLowerCase());
@@ -27,16 +37,19 @@
     if (event.key === 'ArrowDown') { event.preventDefault(); expanded = true; activeIndex = Math.min(activeIndex + 1, Math.max(optionCount - 1, 0)); }
     else if (event.key === 'ArrowUp') { event.preventDefault(); expanded = true; activeIndex = Math.max(activeIndex - 1, 0); }
     else if (event.key === 'Enter' && expanded && optionCount) { event.preventDefault(); choose(activeIndex < matches.length ? matches[activeIndex] : createValue); }
-    else if (event.key === 'Escape') expanded = false;
+    else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); void collapse(true); }
     else if (event.key === 'Backspace' && !query && selected.length) remove(selected.at(-1)!);
   }
 </script>
-<div class="tag-picker">
-  <label for={listId}>{label}</label>
-  <div class="tag-control" class:expanded onfocusout={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) expanded = false; }}>
+<div class="tag-picker" class:compact bind:this={picker}>
+  {#if compact && !expanded}
+    <Tag label="Search tags" iconOnly expanded={false} onclick={open} />
+  {:else}
+  {#if !compact}<label for={listId}>{label}</label>{/if}
+  <div class="tag-control" class:expanded onfocusout={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) void collapse(); }}>
     <div class="tag-chips">
-      {#each selected as tag}<span class="tag-chip">{tag}<button type="button" aria-label={`Remove ${tag}`} onclick={() => remove(tag)}><Icon name="x" size={14} /></button></span>{/each}
-      <input bind:this={input} id={listId} type="search" role="combobox" aria-expanded={expanded} aria-controls={`${listId}-options`} aria-activedescendant={expanded && optionCount ? `${listId}-option-${activeIndex}` : undefined} autocomplete="off" {placeholder} bind:value={query} onfocus={() => expanded = true} oninput={() => { expanded = true; activeIndex = 0; }} onkeydown={keydown} />
+      {#if !compact}{#each selected as tag}<Tag label={tag} removable onclick={() => remove(tag)} />{/each}{/if}
+      <input bind:this={input} id={listId} aria-label={compact ? label : undefined} type="search" role="combobox" aria-expanded={expanded} aria-controls={`${listId}-options`} aria-activedescendant={expanded && optionCount ? `${listId}-option-${activeIndex}` : undefined} autocomplete="off" {placeholder} bind:value={query} onfocus={() => expanded = true} oninput={() => { expanded = true; activeIndex = 0; }} onkeydown={keydown} />
     </div>
     {#if expanded && (matches.length || canCreate)}
       <ul id={`${listId}-options`} role="listbox" aria-label={`${label} options`}>
@@ -45,7 +58,17 @@
       </ul>
     {/if}
   </div>
+  {/if}
 </div>
 <style>
-  .tag-picker{display:grid;gap:.3rem}.tag-control{position:relative;border:1px solid var(--ui-control-border);border-radius:.5rem;background:var(--ui-surface)}.tag-control.expanded,.tag-control:focus-within{border-color:var(--ui-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--ui-accent) 20%,transparent)}.tag-chips{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;padding:.35rem}.tag-chips input{min-width:9rem;flex:1;border:0;outline:0;background:transparent;padding:.2rem;color:var(--ui-text)}.tag-chip{display:inline-flex;align-items:center;gap:.15rem;padding:.18rem .25rem .18rem .45rem;border-radius:999px;background:var(--ui-tag);color:var(--ui-text);font-size:.88rem}.tag-chip button{display:inline-flex;min-height:22px;min-width:22px;padding:0;border:0;border-radius:50%;background:transparent;color:inherit}.tag-chip button:hover{background:#0001}.tag-control ul{position:absolute;z-index:30;top:calc(100% + .25rem);left:0;right:0;max-height:15rem;overflow:auto;margin:0;padding:.3rem;list-style:none;border:1px solid var(--ui-control-border);border-radius:.5rem;background:var(--ui-surface);box-shadow:0 .5rem 1.5rem #1112}.tag-control li button{display:flex;width:100%;min-height:34px;align-items:center;gap:.4rem;padding:.35rem .45rem;border:0;border-radius:.3rem;background:transparent;color:var(--ui-text);text-align:left}.tag-control li[aria-selected=true] button,.tag-control li button:hover{background:var(--ui-surface-muted)}
+  .tag-picker{display:grid;gap:.3rem}
+  .tag-picker.compact{display:inline-grid;vertical-align:middle}
+  .tag-control{position:relative;border:1px solid var(--ui-control-border);border-radius:.5rem;background:var(--ui-surface)}
+  .tag-control.expanded,.tag-control:focus-within{border-color:var(--ui-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--ui-accent) 20%,transparent)}
+  .tag-chips{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;padding:.5rem .6rem}
+  .tag-chips input{min-width:0;width:9rem;flex:1 1 9rem;margin:0;border:0;outline:0;background:transparent;padding:.2rem;color:var(--ui-text);box-shadow:none}
+  ul{position:absolute;top:100%;left:0;right:0;z-index:20;list-style:none;margin:.2rem 0 0;padding:.25rem;max-height:15rem;overflow:auto;border:1px solid var(--ui-control-border);border-radius:.5rem;background:var(--ui-surface);box-shadow:0 4px 12px #0002}
+  li{margin:0;padding:0}
+  li button{display:flex;align-items:center;gap:.4rem;width:100%;margin:0;padding:.5rem .6rem;border:0;border-radius:.3rem;background:transparent;color:var(--ui-text);text-align:left;font:inherit;cursor:pointer}
+  li[aria-selected='true'] button,li button:hover{background:var(--ui-tag)}
 </style>

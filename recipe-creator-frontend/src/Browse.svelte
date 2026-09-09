@@ -4,6 +4,7 @@
   import { load, save } from './local';
   import { browseUrl, bookmarkIds, mealGroup, MEAL_CLASSIFIERS, uniqueTags } from './browse-query';
   import TagPicker from './ui/TagPicker.svelte';
+  import Tag from './ui/Tag.svelte';
   import Icon from './ui/Icon.svelte';
   import Spinner from './ui/Spinner.svelte';
   import type { RecipeSummary } from './types';
@@ -16,7 +17,7 @@
   let {query, selectedTags = [], savedOnly = false}: {query: string; selectedTags?: string[]; savedOnly?: boolean} = $props();
   let items = $state<RecipeSummary[]>([]), tags = $state<string[]>([]), classifiers = $state<string[]>([...MEAL_CLASSIFIERS]);
   let more = $state(false), busy = $state(false), error = $state(''), warnings = $state<string[]>([]);
-  let tagError = $state(''), pickerOpen = $state(false), drafts = $state<DraftSummary[]>([]);
+  let tagError = $state(''), drafts = $state<DraftSummary[]>([]);
   let savedProgress = $state({done: 0, total: 0}), unavailable = $state<string[]>([]), invalidBookmarks = $state(0);
   let failedBatches = $state<number[]>([]), generation = 0, controller: AbortController | undefined;
   const selected = $derived(uniqueTags(selectedTags));
@@ -134,9 +135,9 @@
 
 {#if !savedOnly && drafts.length}<section class="drafts" aria-labelledby="drafts-heading"><div><p class="eyebrow">On this device</p><h2 id="drafts-heading">Your drafts</h2></div><div class="draft-cards">{#each drafts as draft (draft.id)}<article class="draft-card"><span class="draft-badge">Draft</span><h3>{draft.name}</h3><p>Updated {new Date(draft.updatedAt).toLocaleDateString()}</p><a href={draftHref(draft.id)}>Resume</a></article>{/each}</div></section>{/if}
 
-<section class="tag-filters" aria-label="Recipe filters"><div class="quick-tags" use:clipQuickTags={quickTags}>{#each quickTags as tag}<a href={link([...selected, tag])}>{tag}</a>{/each}</div><button type="button" class="search-tags" onclick={() => pickerOpen = !pickerOpen} aria-expanded={pickerOpen}><Icon name="search" size={16} />Search tags</button>{#if pickerOpen}<TagPicker tags={tags} selected={selected} label="Search tags" placeholder="Search tags" allowCreate={false} onchange={setTags} />{/if}{#if tagError}<p class="notice" role="status">{tagError}</p>{/if}</section>
+<section class="tag-filters" aria-label="Recipe filters"><div class="quick-tags" use:clipQuickTags={quickTags}>{#each quickTags as tag}<Tag label={tag} href={link([...selected, tag])} />{/each}</div><TagPicker tags={tags} selected={selected} label="Search tags" placeholder="Search tags" compact allowCreate={false} onchange={setTags} />{#if tagError}<p class="notice" role="status">{tagError}</p>{/if}</section>
 
-{#if selected.length || query}<div class="active-filters" aria-label="Active filters">{#if query}<a class="filter-chip" href={browseUrl({q: '', tags: selected, saved: savedOnly})}>Search: {query}<Icon name="x" size={14} /></a>{/if}{#each selected as tag}<a class="filter-chip" href={link(selected.filter(value => value !== tag))}>{tag}<Icon name="x" size={14} /></a>{/each}<button type="button" onclick={clearFilters}>Clear all</button></div>{/if}
+{#if selected.length || query}<div class="active-filters" aria-label="Active filters">{#if query}<Tag label={`Search: ${query}`} removable href={browseUrl({q: '', tags: selected, saved: savedOnly})} />{/if}{#each selected as tag}<Tag label={tag} removable href={link(selected.filter(value => value !== tag))} />{/each}<button type="button" onclick={clearFilters}>Clear all</button></div>{/if}
 
 {#if error}<div role="alert" class="notice error">{error} <button onclick={() => savedOnly ? void loadSaved(failedBatches.length ? failedBatches : null) : void fetchPage(items.length === 0)}>Try again</button></div>{/if}
 {#each warnings as warning}<p class="notice" role="status">{warning}</p>{/each}
@@ -149,5 +150,5 @@
 {#if more && !savedOnly}<button class="load-more" disabled={busy} onclick={() => void fetchPage()}>Load more recipes</button>{/if}
 
 <style>
-  .page-heading,.drafts,.tag-filters,.active-filters{display:flex;gap:1rem;align-items:center;justify-content:space-between}.bookmark-link,.search-tags{display:inline-flex;align-items:center;gap:.35rem}.drafts,.tag-filters,.active-filters{margin:1rem 0;align-items:flex-start}.drafts{display:block}.draft-cards,.cards{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))}.draft-card{border:1px solid var(--ui-control-border);border-radius:.5rem;padding:.8rem}.draft-card h3{margin:.35rem 0}.draft-card p{margin:.35rem 0;color:var(--ui-muted)}.draft-badge,.filter-chip{display:inline-flex;align-items:center;gap:.25rem;border-radius:999px;padding:.15rem .5rem;background:var(--ui-surface-muted)}.quick-tags,.active-filters{display:flex;gap:.4rem;flex-wrap:wrap}.tag-filters{flex-wrap:wrap}.search-tags{flex-shrink:0}.quick-tags{flex:1;min-width:0;overflow:hidden;white-space:nowrap;flex-wrap:nowrap}.quick-tags a{flex:none}.tag-filters :global(.tag-picker){flex-basis:100%;width:min(100%,28rem)}.recipe-group{margin:1.5rem 0}.card{position:relative}.card img{float:right;object-fit:cover;border-radius:.35rem;margin-left:.75rem}.excerpt{color:var(--ui-muted)}
+  .page-heading,.drafts,.tag-filters,.active-filters{display:flex;gap:1rem;align-items:center;justify-content:space-between}.bookmark-link{display:inline-flex;align-items:center;gap:.35rem}.drafts,.tag-filters,.active-filters{margin:1rem 0;align-items:flex-start}.drafts{display:block}.draft-cards{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))}.draft-card{border:1px solid var(--ui-control-border);border-radius:.5rem;padding:.8rem}.draft-card h3{margin:.35rem 0}.draft-card p{margin:.35rem 0;color:var(--ui-muted)}.draft-badge{display:inline-flex;align-items:center;gap:.25rem;border-radius:999px;padding:.15rem .5rem;background:var(--ui-surface-muted)}.quick-tags,.active-filters{display:flex;gap:.4rem;flex-wrap:wrap}.active-filters{justify-content:flex-start;align-items:center}.tag-filters{flex-wrap:wrap;align-items:center;gap:.5rem}.quick-tags{flex:1;min-width:0;overflow:hidden;white-space:nowrap;flex-wrap:nowrap}.quick-tags :global(.tag){flex:none}.tag-filters :global(.tag-picker){flex:0 1 auto;max-width:100%}.recipe-group{margin:1.5rem 0}.card{position:relative}.card img{float:right;object-fit:cover;border-radius:.35rem;margin-left:.75rem}.excerpt{color:var(--ui-muted)}
 </style>

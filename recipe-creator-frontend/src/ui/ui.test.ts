@@ -6,6 +6,7 @@ import Icon from './Icon.svelte';
 import Modal from './Modal.svelte';
 import Spinner from './Spinner.svelte';
 import TagPicker from './TagPicker.svelte';
+import Tag from './Tag.svelte';
 import Tooltip from './Tooltip.svelte';
 import { createRawSnippet, type Snippet } from 'svelte';
 const emptySnippet = (() => '') as unknown as Snippet;
@@ -81,6 +82,61 @@ it('searches, creates, removes, and supports single tag selection', async () => 
   expect(changes).toHaveBeenLastCalledWith(['Dessert', 'Quick']);
   await fireEvent.click(screen.getByRole('button', {name: 'Remove Dessert'}));
   expect(changes).toHaveBeenLastCalledWith(['Quick']);
+});
+
+it('renders shared tags as text, links, and accessible removable buttons', async () => {
+  const onclick = vi.fn();
+  const { container } = render(Tag, {label: 'Dinner'});
+  expect(screen.getByText('Dinner').closest('.tag')?.tagName).toBe('SPAN');
+  render(Tag, {label: 'Dessert', href: '/browse?tag=Dessert', removable: true, onclick});
+  const link = screen.getByRole('link', {name: 'Remove Dessert'});
+  expect(link).toHaveAttribute('href', '/browse?tag=Dessert');
+  expect(link.querySelector('button')).toBeNull();
+  render(Tag, {label: 'Quick', removable: true, onclick});
+  await fireEvent.click(screen.getByRole('button', {name: 'Remove Quick'}));
+  expect(onclick).toHaveBeenCalledOnce();
+  expect(container.querySelector('.tag svg')).toBeNull();
+});
+
+it('renders an accessible icon-only search badge', async () => {
+  const onclick = vi.fn();
+  render(Tag, {label: 'Search tags', iconOnly: true, expanded: false, onclick});
+  const badge = screen.getByRole('button', {name: 'Search tags'});
+  expect(badge).toHaveAttribute('aria-expanded', 'false');
+  expect(badge).toHaveTextContent('');
+  expect(badge.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  await fireEvent.click(badge);
+  expect(onclick).toHaveBeenCalledOnce();
+});
+
+it('expands compact tag search, selects multiple tags, and restores badge focus on Escape', async () => {
+  const changes = vi.fn();
+  render(TagPicker, {tags: ['Dinner', 'Dessert', 'Quick'], compact: true, allowCreate: false, label: 'Filter tags', onchange: changes});
+  expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button', {name: 'Search tags'}));
+  const input = screen.getByRole('combobox', {name: 'Filter tags'});
+  expect(input).toHaveFocus();
+  expect(screen.queryByText('Filter tags')).not.toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button', {name: 'Dinner'}));
+  expect(input).toHaveFocus();
+  expect(screen.queryByText('Dinner')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', {name: 'Remove Dinner'})).not.toBeInTheDocument();
+  await fireEvent.input(input, {target: {value: 'des'}});
+  await fireEvent.click(screen.getByRole('button', {name: 'Dessert'}));
+  expect(changes).toHaveBeenLastCalledWith(['Dinner', 'Dessert']);
+  expect(input).toHaveValue('');
+  expect(input).toHaveFocus();
+  await fireEvent.keyDown(input, {key: 'Escape'});
+  expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', {name: 'Search tags'})).toHaveFocus();
+});
+
+it('collapses compact tag search when focus moves outside', async () => {
+  render(TagPicker, {tags: ['Dinner'], compact: true});
+  await fireEvent.click(screen.getByRole('button', {name: 'Search tags'}));
+  await fireEvent.focusOut(screen.getByRole('combobox'), {relatedTarget: document.body});
+  expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', {name: 'Search tags'})).toBeInTheDocument();
 });
 
 it('replaces selection in single mode', async () => {

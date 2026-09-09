@@ -8,6 +8,7 @@
   import Photos from './Photos.svelte';
   import Button from './ui/Button.svelte';
   import Icon from './ui/Icon.svelte';
+  import Tag from './ui/Tag.svelte';
   import Modal from './ui/Modal.svelte';
   import Spinner from './ui/Spinner.svelte';
   import Tooltip from './ui/Tooltip.svelte';
@@ -40,7 +41,7 @@
 <div class="byline"><p class="eyebrow">From {recipe.author_name || 'Unknown author'}</p><AuthorPicker {recipe} onchanged={updateAuthor} /></div>
 <h1>{recipe.title}</h1>
 <p class="prose lead">{recipe.description}</p>
-<div class="chips">{#each recipe.tags as tag}<a href={`/?q=${encodeURIComponent(`tag:${tag}`)}`}>{tag}</a>{/each}</div>
+<div class="chips">{#each recipe.tags as tag}<Tag label={tag} href={`/?q=${encodeURIComponent(`tag:${tag}`)}`} />{/each}</div>
 {#if recipe.yield_amount}<p>Makes {recipe.yield_amount} {recipe.yield_unit}</p>{/if}
 {#if safeUrl(recipe.source_url)}<p><a href={safeUrl(recipe.source_url)} target="_blank" rel="noopener noreferrer">Original source ↗</a></p>{/if}
 {#if recipe.modifications}<section><h2>Our modifications</h2><p class="prose">{recipe.modifications}</p></section>{/if}
