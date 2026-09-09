@@ -56,7 +56,7 @@
   <Button variant="ghost" size="sm" ariaLabel={bookmarks.includes(recipe.id) ? 'Remove saved recipe' : 'Save for later'} onclick={() => bookmarks = bookmarks.includes(recipe!.id) ? bookmarks.filter(value => value !== recipe!.id) : [...bookmarks, recipe!.id]}><Icon name="bookmark" color="var(--ui-accent)" fill={bookmarks.includes(recipe.id) ? 'var(--ui-accent)' : undefined} label={bookmarks.includes(recipe.id) ? 'Saved' : 'Save for later'} /></Button>
   <Button variant="ghost" size="sm" onclick={share}><Icon name="share" size={17} />Share</Button>
   <Button variant="ghost" size="sm" onclick={() => window.print()}>Print</Button>
-  <button class="small-control" aria-label={awake ? 'Stop keeping screen awake' : 'Keep screen awake'} aria-pressed={awake} onclick={wake}><Icon name="sun" label={awake ? 'Screen staying awake' : 'Keep screen awake'} /></button>
+  <button class="small-control" aria-label={awake ? 'Stop keeping screen awake' : 'Keep screen awake'} aria-pressed={awake} onclick={wake}><Icon name="sun" color="var(--ui-accent)" fill={awake ? 'var(--ui-accent)' : undefined} label={awake ? 'Screen staying awake' : 'Keep screen awake'} /></button>
   {#if recipe.can_edit}<Button variant="secondary" size="sm" href={`/recipes/${id(recipe.id)}/edit`} onclick={openEditor}><Icon name="edit" size={17} />Edit</Button><Button variant="ghost" size="sm" ariaLabel="Delete recipe" onclick={() => deleteOpen = true}><Icon name="trash" label="Delete recipe" /></Button>{/if}
 </div>
 {#if status}<p role="status" class="notice">{status}</p>{/if}

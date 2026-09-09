@@ -22,6 +22,18 @@ it('opens the editor through the detail action without relying on global link ha
   await fireEvent.click(edit,{button:-1});
   expect(navigate).toHaveBeenCalledWith('/recipes/r1/edit');
 });
+
+it('shows the active wake-lock state with a filled accent icon', async () => {
+  const request = vi.fn(async () => ({release: vi.fn(), addEventListener: vi.fn()}));
+  vi.stubGlobal('navigator', {wakeLock: {request}});
+  mockApi(); render(Detail,{recipeId:'r1',navigate:vi.fn()});
+  await screen.findByRole('heading',{name:'Soup'});
+  const control = screen.getByRole('button',{name:'Keep screen awake'});
+  await fireEvent.click(control);
+  expect(control).toHaveAttribute('aria-pressed','true');
+  expect(control).toHaveAttribute('aria-label','Stop keeping screen awake');
+  expect(control.querySelector('svg')).toHaveAttribute('fill','var(--ui-accent)');
+});
 it('keeps secondary actions subtle and confirms recipe deletion in a modal', async () => {
   const fetcher = mockApi(); const navigate = vi.fn(); render(Detail,{recipeId:'r1',navigate});
   await screen.findByRole('heading',{name:'Soup'});
