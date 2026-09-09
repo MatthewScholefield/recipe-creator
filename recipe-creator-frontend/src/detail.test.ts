@@ -15,6 +15,13 @@ function mockApi() { const fetcher = vi.fn(async (url: string | URL, init?: Requ
   return new Response(JSON.stringify({items:[]}));
 }); vi.stubGlobal('fetch', fetcher); return fetcher; }
 
+it('opens the editor through the detail action without relying on global link handling', async () => {
+  mockApi(); const navigate = vi.fn(); render(Detail,{recipeId:'r1',navigate});
+  await screen.findByRole('heading',{name:'Soup'});
+  await fireEvent.click(screen.getByRole('link',{name:'Edit'}));
+  expect(navigate).toHaveBeenCalledWith('/recipes/r1/edit');
+});
+
 it('keeps secondary actions subtle and confirms recipe deletion in a modal', async () => {
   const fetcher = mockApi(); const navigate = vi.fn(); render(Detail,{recipeId:'r1',navigate});
   await screen.findByRole('heading',{name:'Soup'});
