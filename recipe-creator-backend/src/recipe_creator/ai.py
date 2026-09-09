@@ -19,6 +19,7 @@ from pydantic_ai import (
     ThinkingPartDelta,
     ToolOutput,
 )
+from pydantic_ai.capabilities import Thinking
 from pydantic_ai.messages import PartStartEvent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -79,6 +80,7 @@ parser_agent = Agent(
         "name for an untitled group. Explicitly empty strings and lists represent absent sections. "
         "Do not return IDs, hashes, offsets, line numbers, or source-coverage metadata."
     ),
+    capabilities=[Thinking(effort="low")],
 )
 
 
