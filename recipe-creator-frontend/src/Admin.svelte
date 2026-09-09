@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { ApiError, request, mutate, message, photoUrl, id } from './api';
   import { appState, refreshIdentity, DEFAULT_SITE_COPY, setSiteCopy } from './app-state.svelte';
+  import PhotoDate from './PhotoDate.svelte';
   import Spinner from './ui/Spinner.svelte';
   import Button from './ui/Button.svelte';
   import Icon from './ui/Icon.svelte';
@@ -44,11 +45,14 @@
 <p>Approve each pending photo individually. Trust applies only to future contributions.</p>
 <div class="photo-grid">{#each photos as photo}<figure>
 <a href={photoUrl(photo.id)} target="_blank" rel="noopener" aria-label="Open full-size photo">
-<img src={photoUrl(photo.id, true)} alt={photo.caption || 'Photo awaiting moderation'} width="280" height="210" loading="lazy">
+<!-- svelte-ignore a11y_img_redundant_alt -- exact product copy distinguishes moderation thumbnails -->
+<img src={photoUrl(photo.id, true)} alt="Photo awaiting moderation" width="280" height="210" loading="lazy">
 </a>
-<figcaption>{photo.caption}<small>{photo.uploader_name || photo.uploader_id} · {photo.status}</small>
-<Button variant="ghost" size="sm" href={`/recipes/${id(photo.recipe_id)}`}><Icon name="arrow-right" size={16} />View recipe</Button>
-<div class="toolbar">{#each ['approved','rejected','pending'] as const as state}<button disabled={busy || photo.status === state} onclick={() => void action(() => moderate(photo, state))}>{state === 'approved' ? 'Approve' : state === 'rejected' ? 'Reject' : 'Return to pending'}</button>{/each}</div>{#if photo.uploader_id}<button disabled={busy} onclick={() => {if (confirm('Trust this contributor for future photos? Existing pending photos will still need approval.')) void action(async () => {await mutate(`/admin/users/${id(photo.uploader_id!)}`, {photo_trusted: true}, 'PATCH'); notice = 'Contributor trusted for future photos only.';});}}>Trust future photos</button>{/if}</figcaption>
+<figcaption><small>{photo.uploader_name || photo.uploader_id || 'Unknown contributor'} · {photo.status}</small>
+<PhotoDate createdAt={photo.created_at} />
+{#if photo.caption}<p class="prose">{photo.caption}</p>{/if}
+<div class="photo-actions"><Button variant="ghost" size="sm" href={`/recipes/${id(photo.recipe_id)}`}><Icon name="arrow-right" size={16} />View recipe</Button>
+<div class="toolbar">{#each ['approved','rejected','pending'] as const as state}<button disabled={busy || photo.status === state} onclick={() => void action(() => moderate(photo, state))}>{state === 'approved' ? 'Approve' : state === 'rejected' ? 'Reject' : 'Return to pending'}</button>{/each}</div>{#if photo.uploader_id}<button disabled={busy} onclick={() => {if (confirm('Trust this contributor for future photos? Existing pending photos will still need approval.')) void action(async () => {await mutate(`/admin/users/${id(photo.uploader_id!)}`, {photo_trusted: true}, 'PATCH'); notice = 'Contributor trusted for future photos only.';});}}>Trust future photos</button>{/if}</div></figcaption>
 </figure>{/each}</div>{#if !busy && !photos.length}<p>No photos to review.</p>{/if}
 {:else if tab === 'users'}<h2>Profiles</h2>
 <form class="toolbar" onsubmit={(event) => {event.preventDefault(); void action(() => loadTab('users'));}}>

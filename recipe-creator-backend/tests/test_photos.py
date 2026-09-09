@@ -99,6 +99,21 @@ async def test_pending_is_private_including_recipe_owner_and_metadata(service):
     assert await service.visible_photos(mine=True) == []
 
 
+async def test_caption_boundaries_preserve_authored_text(service):
+    caption = "😀\n" + "a" * 4998
+    photo = await put(service, caption=caption, idempotency_key="long-note")
+    assert photo["caption"] == caption
+    assert (await service.repo.get("photos", photo["id"]))["caption"] == caption
+
+    with pytest.raises(HTTPException) as exc:
+        await put(service, caption=caption + "b", idempotency_key="too-long-note")
+    assert exc.value.status_code == 422
+    assert exc.value.detail == "Caption must be at most 5000 characters"
+
+    empty = await put(service, caption="", idempotency_key="empty-note")
+    assert empty["caption"] == ""
+
+
 async def test_trust_only_affects_future_uploads_moderation_and_recipe_deletion(service):
     pending = await put(service)
     await service.repo.update("users", "uploader", {"photo_trust": True})
@@ -558,11 +573,16 @@ async def test_real_database_upload_visibility_quota_and_restart(tmp_path):
             await repo.create("users", {"state": "active"}, "uploader")
             await repo.create("recipes", {"owner_id": "owner", "title": "Meal"}, "recipe")
             service = PhotoService(repo, settings)
+            requested_at = datetime.now(UTC)
             photo = await put(service)
+            assert requested_at <= datetime.fromisoformat(photo["created_at"]) <= datetime.now(UTC)
+            assert datetime.fromisoformat(photo["created_at"]).tzinfo == UTC
             assert await service.visible_photos(user_id="owner") == []
             async with Repository(settings) as other:
                 restarted = PhotoService(other, settings)
-                assert (await put(restarted))["id"] == photo["id"]
+                retried = await put(restarted)
+                assert retried["id"] == photo["id"]
+                assert retried["created_at"] == photo["created_at"]
                 await restarted.moderate(photo["id"], "approved")
                 assert (await restarted.image(photo["id"]))[1]
                 results = await asyncio.gather(*(put(restarted, idempotency_key=str(i)) for i in range(3)),

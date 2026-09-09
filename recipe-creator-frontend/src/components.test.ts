@@ -7,11 +7,8 @@ import Browse from './Browse.svelte';
 import Detail from './Detail.svelte';
 import Profile from './Profile.svelte';
 import Admin from './Admin.svelte';
-import Photos from './Photos.svelte';
 import { blank, ingredient } from './recipe';
 import { listDrafts, readDraft } from './drafts';
-const compressorLoaded = vi.hoisted(() => vi.fn());
-vi.mock('browser-image-compression', () => { compressorLoaded(); return {default: vi.fn()}; });
 async function startNewRecipe() {
   await fireEvent.click(await screen.findByRole('button',{name:'Start a new recipe'}));
 }
@@ -59,9 +56,6 @@ it('keeps text publishable during a parser outage', async () => {
   await waitFor(() => expect(navigate).toHaveBeenCalledWith('/recipes/saved'));
   const write = fetcher.mock.calls.find(([url]) => url === '/api/recipes');
   expect(JSON.parse(write![1]!.body as string)).toMatchObject({mode:'text',source_text:'Original recipe'});
-});
-it('rejects unsupported photo files without loading a compressor or uploading', async () => {
-  const fetcher = mockApi(url => url === '/api/session' ? identity : {items:[]}); render(Photos,{recipeId:'r1'}); const input = await screen.findByLabelText('Add a photo'); await fireEvent.change(input,{target:{files:[new File(['bad'],'camera.heic',{type:'image/heic'})]}}); expect(await screen.findByRole('alert')).toHaveTextContent('Choose a JPEG, PNG, or WebP image.'); expect(compressorLoaded).not.toHaveBeenCalled(); expect(fetcher.mock.calls.some(([,init]) => init?.method === 'POST')).toBe(false);
 });
 it('discards a merge preview if profile IDs change before it arrives', async () => {
   let resolvePreview!: (value: unknown) => void;

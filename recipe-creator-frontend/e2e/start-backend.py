@@ -35,10 +35,11 @@ def main():
         return subprocess.run(cli + sys.argv[1:], cwd=env["RECIPE_MEDIA_ROOT"], env=env).returncode
 
     # Never connect to an existing database or inherit application .env settings.
+    api_port = int(os.environ.get("RECIPE_E2E_API_PORT", "2332"))
     with socket.socket() as probe:
         # Permit a fresh run after graceful shutdown leaves TIME_WAIT sockets.
         probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        probe.bind(("127.0.0.1", 2332))
+        probe.bind(("127.0.0.1", api_port))
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         db_port = probe.getsockname()[1]
@@ -60,7 +61,7 @@ def main():
             "RECIPE_SESSION_SECRET": uuid4().hex + uuid4().hex,
             "RECIPE_AI_API_KEY": "",
             # Exercise real parse-error handling without contacting an external provider.
-            "RECIPE_AI_BASE_URL": "http://127.0.0.1:2332/e2e-unavailable-ai",
+            "RECIPE_AI_BASE_URL": f"http://127.0.0.1:{api_port}/e2e-unavailable-ai",
             "WEB_CONCURRENCY": "1",
         })
         try:
@@ -85,7 +86,7 @@ def main():
             print(f"E2E database: {env['RECIPE_DB_URL']} recipe_e2e/{env['RECIPE_DB_DATABASE']}; media: {root}", flush=True)
             api = subprocess.Popen([
                 "uv", "run", "--project", str(backend), "uvicorn", "recipe_creator.app:app",
-                "--host", "127.0.0.1", "--port", "2332", "--workers", "1", "--no-proxy-headers",
+                "--host", "127.0.0.1", "--port", str(api_port), "--workers", "1", "--no-proxy-headers",
             ], cwd=root, env=env, start_new_session=True)
             return api.wait()
         finally:

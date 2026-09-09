@@ -184,8 +184,8 @@ class PhotoService:
         user_id = _id(user, "users")
         user_id = await self._charge(user_id, ip)
         recipe_id = _id(recipe, "recipes")
-        if not isinstance(caption, str) or len(caption) > 1000:
-            raise _error(422, "Caption must be at most 1000 characters")
+        if not isinstance(caption, str) or len(caption) > 5000:
+            raise _error(422, "Caption must be at most 5000 characters")
         if idempotency_key is not None and (not isinstance(idempotency_key, str)
                                             or not 1 <= len(idempotency_key) <= 200):
             raise _error(400, "Invalid idempotency key")

@@ -92,16 +92,29 @@ test('admin sees raw pending photos and moderates the actual submission', async 
   await page.goto(`/recipes/${encodeURIComponent(recipe.id)}`);
   await expect(page.getByRole('heading', {name: 'Photos', exact: true})).toBeVisible();
   const png = await page.evaluate(() => {const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64; const paint = canvas.getContext('2d')!; paint.fillStyle = '#c63'; paint.fillRect(0, 0, 64, 64); return canvas.toDataURL('image/png').split(',')[1];});
+  const note = [`Dinner ${recipe.id}`, 'Substituted oat milk for cream and added smoked paprika.', 'x'.repeat(1050), 'The sauce stayed silky.\\n<script>window.photoNoteExecuted = true</script> remained plain text.'].join('\\n\\n');
   await page.getByLabel('Add a photo', {exact: true}).setInputFiles({name: 'dinner.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64')});
   await expect(page.getByText('Ready to upload.', {exact: true})).toBeVisible();
-  await page.getByLabel('Caption').fill(`Dinner ${recipe.id}`);
+  await page.getByLabel('Photo note (optional)').fill(note);
+  const requestedAt = new Date();
   await page.getByRole('button', {name: /Submit photo/}).click();
   await expect(page.getByText('Private submission: pending')).toBeVisible();
+  const completedAt = new Date();
+  await expect(page.locator('figure').filter({hasText: `Dinner ${recipe.id}`}).locator('.prose')).toHaveText(note);
+  expect(await page.evaluate(() => (window as Window & {photoNoteExecuted?: boolean}).photoNoteExecuted)).toBeUndefined();
   const submissions = await (await context.request.get(`/api/photos?recipe_id=${encodeURIComponent(recipe.id)}&mine=true`)).json();
   expect(submissions.items).toHaveLength(1);
   const submitted = submissions.items[0];
   expect(submitted.status).toBe('pending');
+  expect(submitted.caption).toBe(note);
+  expect(submitted.created_at).toMatch(/(?:Z|\+00:00)$/);
+  expect(new Date(submitted.created_at).getTime()).toBeGreaterThanOrEqual(requestedAt.getTime());
+  expect(new Date(submitted.created_at).getTime()).toBeLessThanOrEqual(completedAt.getTime());
   const imagePath = `/api/photos/${encodeURIComponent(submitted.id)}/image`;
+  await page.reload();
+  const pendingPhoto = page.locator('figure').filter({hasText: `Dinner ${recipe.id}`});
+  await expect(pendingPhoto.locator('.prose')).toHaveText(note);
+  await expect(pendingPhoto.getByText('Uploaded', {exact: false})).toBeVisible();
   await second.page.goto('/admin');
   await expect(second.page.getByText('Your current profile does not have admin access.')).toBeVisible();
   expect((await session(second.context.request)).user).toBeNull();
@@ -118,17 +131,21 @@ test('admin sees raw pending photos and moderates the actual submission', async 
   expect(image.headers()['content-type']).toBe('image/jpeg');
   expect(image.headers()['cache-control']).toBe('private, no-store');
   const raw = await (await second.context.request.get('/api/admin/photos')).json();
-  expect(raw.photos).toEqual(expect.arrayContaining([expect.objectContaining({id: submitted.id, status: 'pending'})]));
+  expect(raw.photos).toEqual(expect.arrayContaining([expect.objectContaining({id: submitted.id, status: 'pending', caption: note, created_at: submitted.created_at})]));
   const photo = second.page.locator('figure').filter({hasText: `Dinner ${recipe.id}`});
   await expect(photo).toContainText('pending');
+  await expect(photo.locator('.prose')).toHaveText(note);
+  await expect(photo.getByText('Uploaded', {exact: false})).toBeVisible();
   await photo.getByRole('button', {name: 'Approve', exact: true}).click();
   await expect(photo).toContainText('approved');
   await page.reload();
   const publishedPhoto = page.locator('figure').filter({hasText: `Dinner ${recipe.id}`});
   await expect(publishedPhoto).toBeVisible();
+  await expect(publishedPhoto.locator('.prose')).toHaveText(note);
+  await expect(publishedPhoto.getByText('Uploaded', {exact: false})).toBeVisible();
   await expect(publishedPhoto.getByText(/Private submission:/)).toHaveCount(0);
   expect((await (await context.request.get(`/api/photos?recipe_id=${encodeURIComponent(recipe.id)}&mine=true`)).json()).items)
-    .toEqual(expect.arrayContaining([expect.objectContaining({id: submitted.id, status: 'approved'})]));
+    .toEqual(expect.arrayContaining([expect.objectContaining({id: submitted.id, status: 'approved', caption: note, created_at: submitted.created_at})]));
   expect((await session(second.context.request)).user!.id).toBe(moderator.user!.id);
   await adminPermission(moderator.user!.id, false);
   expect((await session(second.context.request)).admin).toBe(false);
@@ -136,4 +153,38 @@ test('admin sees raw pending photos and moderates the actual submission', async 
   expect((await mutate(second.context.request, `/admin/photos/${encodeURIComponent(submitted.id)}/moderate`, {state: 'pending'})).status()).toBe(403);
   expect((await second.context.request.get(imagePath)).status()).toBe(200);
   expect((await (await second.context.request.get(`/api/photos?recipe_id=${encodeURIComponent(recipe.id)}`)).json()).items).toEqual(expect.arrayContaining([expect.objectContaining({id: submitted.id, status: 'approved'})]));
+});
+
+test('drag and drop prepares a draft and discard permits selecting the same file', async ({page, context, recipe}) => {
+  await page.goto(`/recipes/${encodeURIComponent(recipe.id)}`);
+  const png = await page.evaluate(() => {const canvas = document.createElement('canvas'); canvas.width = 48; canvas.height = 48; const paint = canvas.getContext('2d')!; paint.fillStyle = '#486'; paint.fillRect(0, 0, 48, 48); return canvas.toDataURL('image/png').split(',')[1];});
+  const drop = async () => page.locator('.dropper').evaluate((element, value) => {
+    const bytes = Uint8Array.from(atob(value), character => character.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], 'dropped.png', {type: 'image/png'}));
+    element.dispatchEvent(new DragEvent('drop', {bubbles: true, cancelable: true, dataTransfer: transfer}));
+  }, png);
+
+  await drop();
+  const noteInput = page.getByLabel('Photo note (optional)');
+  await expect(noteInput).toBeVisible();
+  await expect(page.locator('.dropper')).toHaveCount(0);
+  expect((await (await context.request.get(`/api/photos?recipe_id=${encodeURIComponent(recipe.id)}&mine=true`)).json()).items).toEqual([]);
+  const note = 'Dropped this photo.\\n\\nUsed less salt and the crust stayed crisp.';
+  await noteInput.fill(note);
+  await page.getByRole('button', {name: 'Submit photo'}).click();
+  await expect(page.getByText('Photo submitted.')).toBeVisible();
+  const saved = await (await context.request.get(`/api/photos?recipe_id=${encodeURIComponent(recipe.id)}&mine=true`)).json();
+  expect(saved.items).toEqual([expect.objectContaining({caption: note})]);
+
+  const input = page.getByLabel('Add a photo', {exact: true});
+  const file = {name: 'dropped.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64')};
+  await input.setInputFiles(file);
+  await expect(page.getByLabel('Photo note (optional)')).toHaveValue('');
+  await page.getByLabel('Photo note (optional)').fill('Discard me');
+  await page.getByRole('button', {name: 'Discard photo'}).click();
+  await expect(page.getByLabel('Add a photo', {exact: true})).toBeVisible();
+  await page.getByLabel('Add a photo', {exact: true}).setInputFiles(file);
+  await expect(page.getByLabel('Photo note (optional)')).toBeVisible();
+  await expect(page.getByLabel('Photo note (optional)')).toHaveValue('');
 });

@@ -143,7 +143,7 @@ def create_app(settings: Settings | None = None, repo=None, run_jobs=True):
 
     @app.post("/api/recipes/{recipe_id}/photos", status_code=201)
     async def upload_photo(request: Request, recipe_id: str, file: UploadFile = File(),
-                           caption: str = Form(default="", max_length=1000),
+                           caption: str = Form(default="", max_length=5000),
                            idempotency_key: str | None = Header(default=None, min_length=1, max_length=200)):
         context = await require_user(request)
         try:

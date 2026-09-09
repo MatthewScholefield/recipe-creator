@@ -9,7 +9,7 @@ export type GramEstimate = Schemas['GramEstimate'];
 export type Ingredient = Omit<Required<Schemas['Ingredient']>, 'grams'> & { grams: GramEstimate | null };
 export type IngredientGroup = Omit<Required<Schemas['IngredientGroup']>, 'ingredients'> & { ingredients: Ingredient[] };
 export type RecipeDraft = Omit<Required<Schemas['RecipeDraft']>, 'ingredient_groups'> & { ingredient_groups: IngredientGroup[] };
-export interface Photo { id: string; recipe_id: string; uploader_id?: string; uploader_name?: string; caption: string; state: string; can_delete?: boolean }
+export interface Photo { id: string; recipe_id: string; uploader_id?: string; uploader_name?: string; caption: string; state: string; created_at?: string | null; can_delete?: boolean }
 export interface AdminPhoto extends Omit<Photo, 'state' | 'can_delete'> { status: 'pending' | 'approved' | 'rejected' }
 export type Recipe = Omit<Schemas['Recipe'], 'ingredient_groups' | 'photos'> & { ingredient_groups: IngredientGroup[]; photos?: Photo[] };
 export type RecipeSummary = Schemas['RecipeSummary'];
