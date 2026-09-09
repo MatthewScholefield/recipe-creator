@@ -517,11 +517,13 @@ async def parse(request: Request, body: ParseRequest):
     await retry_transaction(request.app.state.repo, reserve)
     try:
         result = await ai.parse_recipe(body.source_text, request.app.state.settings)
-        result = {**result, "source_text": body.source_text,
-                  "ingredient_groups": _groups_output(result.get("ingredient_groups", []), ai.source_hash(body.source_text))}
-        gaps = result.get("unclassified", "")
-        result["unclassified"] = "".join(piece["text"] for piece in gaps) if isinstance(gaps, list) else gaps
-        return result
+        return {
+            **result,
+            "source_text": body.source_text,
+            "ingredient_groups": _groups_output(
+                result.get("ingredient_groups", []), ai.source_hash(body.source_text)
+            ),
+        }
     except Exception as exc:
         logger.opt(exception=exc).error("Recipe parsing failed")
         raise HTTPException(503, "Recipe parsing is temporarily unavailable") from None

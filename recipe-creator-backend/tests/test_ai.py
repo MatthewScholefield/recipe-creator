@@ -8,7 +8,7 @@ from pydantic_ai.messages import ModelResponse, ToolCallPart, UserPromptPart
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
-from recipe_creator.ai import ParseRequest, materialize, parse_recipe, parser_agent, source_hash
+from recipe_creator.ai import ParseRequest, parse_recipe, parser_agent, source_hash
 from recipe_creator.settings import Settings
 
 
@@ -17,48 +17,66 @@ def no_paid_calls(monkeypatch):
     monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", False)
 
 
-def output(source, **kwargs):
-    return {"source_hash": source_hash(source), **kwargs}
+def output(**kwargs):
+    return {
+        "description": "",
+        "ingredient_groups": [],
+        "directions": "",
+        "notes": "",
+        "unclassified": "",
+        **kwargs,
+    }
 
 
-def test_request_rejects_identity_and_generated_prose():
+def test_request_rejects_identity():
     with pytest.raises(ValidationError):
         ParseRequest(source_text="Recipe", display_name="private")
-    with pytest.raises(ValidationError):
-        materialize("Recipe", output("Recipe", description="invented"))
-    with pytest.raises(ValidationError):
-        materialize("Recipe", {**output("Recipe"), "title": "invented"})
 
 
-@pytest.mark.parametrize("change", [
-    {"source_hash": "0" * 64},
-    {"directions": [{"start": 0, "end": 99}]},
-    {"directions": [{"start": 3, "end": 3}]},
-    {"directions": [{"start": 4, "end": 6}, {"start": 0, "end": 2}]},
-    {"description": [{"start": 0, "end": 3}], "notes": [{"start": 2, "end": 4}]},
-    {"ingredient_groups": [{"ingredients": [{"start": 4, "end": 6}]},
-                           {"ingredients": [{"start": 0, "end": 2}]}]},
-    {"notes": [{"start": True, "end": 2}]},
-])
-def test_invalid_spans_rejected(change):
-    with pytest.raises(ValueError):
-        materialize("abcdef", {**output("abcdef"), **change})
-
-
-def test_lossless_unicode_and_whitespace():
-    source = "🍋 Café\r\nSauce:\n½ kg flour\n\nMix!\nsecret note"
-    start = source.index("½")
-    end = source.index("\n", start)
-    data = materialize(source, output(source, ingredient_groups=[{
-        "title": {"start": source.index("Sauce"), "end": source.index(":") + 1},
-        "ingredients": [{"start": start, "end": end}],
-    }], directions=[{"start": source.index("Mix"), "end": source.index("!", end) + 1}]))
-    group = data["ingredient_groups"][0]
-    pieces = data["unclassified"] + group["ingredients"] + data["direction_spans"]
-    pieces.append({"text": group["title"], "span": group["title_span"]})
-    assert "".join(p["text"] for p in sorted(pieces, key=lambda p: p["span"]["start"])) == source
-    assert group["ingredients"][0]["original_text"] == "½ kg flour"
+async def test_reformatted_unicode_and_whitespace_are_direct_output():
+    source = (
+        "Café pancakes\r\nBatter:\r\n- ½ kg flour\r\n- 2 eggs\r\nSauce:\r\n"
+        "- 1 lemon\r\n1) Mix  gently.\r\n2) Bake at 180°C for 20 minutes.\r\n"
+        "Note: Keep cool.\r\n??? handwritten mark"
+    )
+    expected = output(
+        description="Café pancakes",
+        ingredient_groups=[
+            {
+                "name": "Batter",
+                "ingredients": [
+                    {"original_text": "½ kg flour"},
+                    {"original_text": "2 eggs"},
+                ],
+            },
+            {
+                "name": "Sauce",
+                "ingredients": [{"original_text": "1 lemon"}],
+            },
+        ],
+        directions="Mix gently.\n\nBake at 180°C for 20 minutes.",
+        notes="Keep cool.",
+        unclassified="??? handwritten mark",
+    )
+    with parser_agent.override(model=TestModel(custom_output_args=expected)):
+        data = await parse_recipe(source, Settings())
+    assert data["description"] == "Café pancakes"
+    assert data["ingredient_groups"] == expected["ingredient_groups"]
+    assert data["directions"] == expected["directions"]
+    assert data["notes"] == "Keep cool."
+    assert data["unclassified"] == "??? handwritten mark"
+    assert data["source_text"] == source
+    assert data["source_hash"] == source_hash(source)
     assert data["warnings"] == ["unclassified_source"]
+
+
+async def test_empty_unclassified_has_no_warning():
+    source = "Mix now."
+    expected = output(directions="Mix now.")
+    with parser_agent.override(model=TestModel(custom_output_args=expected)):
+        data = await parse_recipe(source, Settings())
+    assert data["unclassified"] == ""
+    assert data["warnings"] == []
 
 
 async def test_ingredient_batch_one_request_no_transport_retries(monkeypatch):
@@ -93,30 +111,72 @@ async def test_ingredient_batch_one_request_no_transport_retries(monkeypatch):
 
 async def test_tool_output_without_network():
     source = "250 g flour"
-    with parser_agent.override(model=TestModel(custom_output_args=output(source, ingredient_groups=[{
-        "ingredients": [{"start": 0, "end": len(source)}],
-    }]))):
+    with parser_agent.override(
+        model=TestModel(
+            custom_output_args=output(
+                ingredient_groups=[
+                    {
+                        "name": "",
+                        "ingredients": [{"original_text": source}],
+                    }
+                ]
+            )
+        )
+    ):
         result = await parse_recipe(source, Settings())
-    assert result["ingredient_groups"][0]["ingredients"][0]["text"] == source
+    assert result["ingredient_groups"][0]["ingredients"][0]["original_text"] == source
 
 
 async def test_only_source_sent_and_validation_retries():
+    from pydantic_ai.exceptions import UnexpectedModelBehavior
+
     source = "Mix now."
     calls = []
 
     async def respond(messages, info):
-        prompts = [p.content for m in messages for p in m.parts if isinstance(p, UserPromptPart)]
-        payload = json.loads(prompts[0])
-        assert payload == {"source_text": source, "source_hash": source_hash(source)}
+        prompts = [
+            p.content
+            for m in messages
+            for p in m.parts
+            if isinstance(p, UserPromptPart)
+        ]
+        assert json.loads(prompts[0]) == {"source_text": source}
         assert not info.allow_text_output
         calls.append(1)
-        data = output(source, directions=[{"start": 0, "end": 99 if len(calls) == 1 else len(source)}])
-        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, data)])
+        directions = [{"invalid": True}] if len(calls) == 1 else source
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    output(directions=directions),
+                )
+            ]
+        )
 
     with parser_agent.override(model=FunctionModel(respond)):
-        result = await parse_recipe(source, Settings(db_user="private-name", ai_api_key="private-key"))
+        result = await parse_recipe(
+            source, Settings(db_user="private-name", ai_api_key="private-key")
+        )
     assert len(calls) == 2
     assert result["directions"] == source
+
+    failed_calls = []
+
+    async def invalid(messages, info):
+        failed_calls.append(1)
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    output(directions=[{"invalid": True}]),
+                )
+            ]
+        )
+
+    with parser_agent.override(model=FunctionModel(invalid)):
+        with pytest.raises(UnexpectedModelBehavior):
+            await parse_recipe(source, Settings())
+    assert len(failed_calls) == 2
 
 
 async def test_timeout_and_concurrency():
@@ -128,30 +188,20 @@ async def test_timeout_and_concurrency():
         maximum = max(maximum, active)
         try:
             await asyncio.sleep(.02)
-            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, output("x"))])
+            return ModelResponse(
+                parts=[ToolCallPart(info.output_tools[0].name, output())]
+            )
         finally:
             active -= 1
 
     with parser_agent.override(model=FunctionModel(respond)):
-        await asyncio.gather(*(parse_recipe("x", Settings(ai_concurrency=1)) for _ in range(3)))
+        await asyncio.gather(
+            *(parse_recipe("x", Settings(ai_concurrency=1)) for _ in range(3))
+        )
         assert maximum == 1
         with pytest.raises(TimeoutError):
             await parse_recipe("x", Settings(ai_timeout_seconds=.001))
     assert active == 0
-
-
-def test_parse_strings_add_only_block_delimiters():
-    source = "  Mix\r\nslowly!\nOTHER\nBake.\nKeep  cool."
-    spans = [{"start": 0, "end": source.index("\nOTHER")},
-             {"start": source.index("Bake"), "end": source.index("Bake") + 5}]
-    result = materialize(source, output(source, directions=spans, notes=[{
-        "start": source.index("Keep"), "end": len(source),
-    }]))
-    assert result["directions"] == "  Mix\r\nslowly!\n\nBake."
-    assert result["notes"] == "Keep  cool."
-    assert result["source_text"] == source
-    assert [p["span"] for p in result["direction_spans"]] == spans
-    assert any("OTHER" in p["text"] for p in result["unclassified"])
 
 
 async def test_estimator_typed_separate_hash_bound_and_private():

@@ -239,9 +239,18 @@ async def test_parse_quota_exact_source_and_sanitized_failure(app, monkeypatch):
     calls = []
     async def parse(source, settings):
         calls.append(source)
-        return {"source_hash": ai.source_hash(source), "description": "", "directions": "", "notes": "",
-                "ingredient_groups": [{"title": "", "ingredients": [{"original_text": "2 eggs"}]}],
-                "unclassified": [{"text": source}], "warnings": []}
+        return {
+            "source_hash": ai.source_hash(source),
+            "source_text": source,
+            "description": "",
+            "directions": "",
+            "notes": "",
+            "ingredient_groups": [
+                {"name": "", "ingredients": [{"original_text": "2 eggs"}]}
+            ],
+            "unclassified": source,
+            "warnings": ["unclassified_source"],
+        }
     monkeypatch.setattr(ai, "parse_recipe", parse)
     async with client(app) as browser:
         assert (await browser.post("/parse", json={"source_text": "text"})).status_code == 200
@@ -251,7 +260,10 @@ async def test_parse_quota_exact_source_and_sanitized_failure(app, monkeypatch):
         result = await browser.post("/parse", json={"source_text": source})
         assert result.status_code == 200, result.text
         assert result.json()["unclassified"] == source == result.json()["source_text"]
-        assert result.json()["ingredient_groups"][0]["ingredients"][0]["id"]
+        group = result.json()["ingredient_groups"][0]
+        assert group["name"] == ""
+        assert group["ingredients"][0]["original_text"] == "2 eggs"
+        assert group["ingredients"][0]["id"]
         assert len(await app.state.repo.list("usage")) == 3
         async def fail(source, settings):
             raise RuntimeError("provider secret token")
