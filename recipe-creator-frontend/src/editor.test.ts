@@ -54,6 +54,25 @@ it('organizes anonymously in two guarded stages and shows the bottom name toolti
   expect(fetcher.mock.calls.some(([url]) => String(url).includes('/identity'))).toBe(false);
   expect(screen.getByRole('button',{name:'Publish recipe'})).toBeDisabled();
 });
+it('explains organizer warnings and identifies ingredients kept as written', async () => {
+  const value = localDraft();
+  const parsed = {...parseResult(),unclassified:'A note that needs review',warnings:['unclassified_source']};
+  mockApi((url, init) => {
+    if (url === '/api/parse') return parsed;
+    const {lines} = JSON.parse(init!.body as string) as {lines:{id:string;text:string}[]};
+    return {items:lines.map(line => ({...line,method:'unparsed',ingredient:{...changedIngredient(ingredient(),line.text),id:line.id}})),warnings:['ingredient_fallback_invalid']};
+  });
+  render(Editor,{draftId:value.id,navigate:vi.fn()}); await screen.findByLabelText('Paste or write your recipe');
+  await fireEvent.click(screen.getByRole('button',{name:'Organize'}));
+  const heading = await screen.findByRole('heading',{name:'Ingredients kept as written'});
+  const information = heading.closest('section')!;
+  expect(information).toHaveTextContent('2 eggs');
+  expect(information).toHaveTextContent('Make sure that’s okay before saving');
+  expect(screen.getByText(/Some original text could not be placed in a recipe section/)).toBeInTheDocument();
+  expect(screen.getByText(/could not reliably read some ingredient quantities/)).toBeInTheDocument();
+  expect(screen.queryByText('unclassified_source')).not.toBeInTheDocument();
+  expect(screen.queryByText('ingredient_fallback_invalid')).not.toBeInTheDocument();
+});
 it('repairs duplicate parser IDs before the ingredient preview request', async () => {
   const value = localDraft();
   const parsed = parseResult();

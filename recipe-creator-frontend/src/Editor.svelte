@@ -20,6 +20,13 @@
   const storageKey = untrack(() => `draft:${recipeId || 'new'}`);
   const helpId = `publish-help-${crypto.randomUUID()}`;
   const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const WARNING_MESSAGES: Record<string, string> = {
+    unclassified_source: 'Some original text could not be placed in a recipe section. Review “Other original text” to make sure it is in the right place.',
+    ingredient_fallback_invalid: 'The organizer could not reliably read some ingredient quantities. Those ingredients were kept exactly as written.',
+    ingredient_fallback_unavailable: 'Ingredient organization was temporarily unavailable. The affected ingredients were kept exactly as written.'
+  };
+  const warningMessage = (warning: string): string => WARNING_MESSAGES[warning] ||
+    'The organizer could not fully organize this recipe. Review the result before saving.';
   let draft = $state<RecipeDraft>(blank('text')), revision = $state<number>(), undo = $state<RecipeDraft>();
   let dirty = $state<Record<string, string>>({}), undoLines = $state<Record<string, string>>({});
   let ready = $state(false), allowed = $state(untrack(() => !recipeId)), busy = $state(false), parsing = $state(false);
@@ -34,6 +41,7 @@
   const guard = new ParseGuard(), lifetime = new AbortController();
   const inputs = new Map<string, HTMLInputElement>();
   let hasIdentity = $derived(appState.identity?.user?.state === 'active');
+  let unorganizedIngredients = $derived(originalOption ? dirtyIngredientLines(draft, dirty).map(line => line.text) : []);
   let validation = $derived(tagError(draft.tags));
   let editing = $derived(!!recipeId || !!activeId);
   let submitHelp = $derived(!hasIdentity ? `Set your name to ${recipeId ? 'save changes' : 'publish'}` :
@@ -170,12 +178,12 @@
     for (const item of result.items) if (item.method !== 'unparsed') delete remaining[item.id];
     dirty = remaining; warnings = [...warnings, ...result.warnings];
     originalOption = result.items.some(item => item.method === 'unparsed');
-    if (originalOption) notice = 'Some quantities could not be organized. Review the lines or save with original ingredient text.';
+    if (originalOption) notice = '';
     return !originalOption;
   }
   async function organizeIngredients() {
     if (busy || parsing) return;
-    error = ''; warnings = []; const {version, signal} = guard.start(); parsing = true;
+    error = ''; notice = ''; warnings = []; const {version, signal} = guard.start(); parsing = true;
     try { await previewLines(version, signal); }
     catch (e) { if (guard.accepts(version)) { error = message(e); originalOption = true; } }
     finally { if (guard.accepts(version)) parsing = false; }
@@ -307,7 +315,12 @@
       </fieldset>
       {#if parsing}<div class="toolbar"><Spinner label="Organizing…" /><button type="button" onclick={cancelParse}>Cancel organizing</button></div>{/if}
       {#if busy}<div class="toolbar"><Spinner label="Saving recipe…" /><button type="button" onclick={() => {cancelWork(); notice = 'Save cancelled. Your draft is retained; retry uses the same publishing key.';}}>Cancel saving</button></div>{/if}
-      {#each warnings as warning}<p class="notice">{warning}</p>{/each}
+      {#each warnings as warning}<p class="notice">{warningMessage(warning)}</p>{/each}
+      {#if unorganizedIngredients.length}<section class="notice" role="status" aria-labelledby="unorganized-ingredients-heading">
+        <h2 id="unorganized-ingredients-heading">Ingredients kept as written</h2>
+        <p>These ingredients could not be organized. Make sure that’s okay before saving:</p>
+        <ul>{#each unorganizedIngredients as line}<li>{line}</li>{/each}</ul>
+      </section>{/if}
       {#if notice}<p role="status" class="notice">{notice}</p>{/if}
       <p class="help" role="status">{persisted}</p>
       {#if !hasIdentity}<IdentityPrompt onready={(value) => {appState.identity = value; notice = 'Name set. Review your recipe, then publish.';}} />{/if}
