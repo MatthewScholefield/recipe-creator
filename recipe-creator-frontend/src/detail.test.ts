@@ -18,13 +18,14 @@ function mockApi() { const fetcher = vi.fn(async (url: string | URL, init?: Requ
 it('opens the editor through the detail action without relying on global link handling', async () => {
   mockApi(); const navigate = vi.fn(); render(Detail,{recipeId:'r1',navigate});
   await screen.findByRole('heading',{name:'Soup'});
-  await fireEvent.click(screen.getByRole('link',{name:'Edit'}));
+  const edit = screen.getByRole('link',{name:'Edit'});
+  await fireEvent.click(edit,{button:-1});
   expect(navigate).toHaveBeenCalledWith('/recipes/r1/edit');
 });
-
 it('keeps secondary actions subtle and confirms recipe deletion in a modal', async () => {
   const fetcher = mockApi(); const navigate = vi.fn(); render(Detail,{recipeId:'r1',navigate});
   await screen.findByRole('heading',{name:'Soup'});
+  expect(screen.getByRole('button',{name:'Keep screen awake'}).querySelector('svg')).toHaveClass('lucide-sun');
   expect(screen.getByRole('button',{name:'Save for later'})).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Save for later'}).querySelector('svg')).toHaveAttribute('fill','none');
   expect(screen.getByRole('button',{name:'Save for later'}).querySelector('svg')).toHaveAttribute('stroke','var(--ui-accent)');
