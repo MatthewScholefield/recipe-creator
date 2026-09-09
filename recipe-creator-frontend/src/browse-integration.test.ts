@@ -63,7 +63,7 @@ it('binds live home copy and same-tab draft updates without treating drafts as p
   const component = render(Browse, {query: ''});
   const draftTitle = await screen.findByRole('link', {name: 'First local draft'});
   expect(draftTitle).toHaveAttribute('href', draftHref(draft.id));
-  const draftRegion = screen.getByRole('region', {name: 'Your drafts'});
+  const draftRegion = screen.getByRole('region', {name: 'Drafts'});
   expect(draftRegion.querySelector('.card')).toHaveClass('draft');
   expect(draftRegion.querySelector('time')).toHaveAttribute('datetime', draft.updatedAt);
   expect(draftRegion.querySelector('img')).toBeNull();

@@ -250,9 +250,9 @@
 {:else if ready && !allowed}<p>You can read this recipe, but only its owner or an administrator can edit it. Your local draft has been kept.</p>
 {:else if ready}
   {#if !recipeId && !editing}
-    <section aria-label="Your drafts">
+    <section aria-label="Drafts">
       <button class="primary" onclick={startNew}><Icon name="plus" size={18} />Start a new recipe</button>
-      {#if drafts.length}<h2>Your drafts <small>· On this device</small></h2>
+      {#if drafts.length}<h2>Drafts</h2>
         <ul class="draft-list">{#each drafts as item (item.id)}<li><span><strong>{item.name}</strong><small>{new Date(item.updatedAt).toLocaleString()}</small></span><Button variant="secondary" size="sm" href={draftHref(item.id)}><Icon name="edit" size={16} />Resume<span class="sr-only"> {item.name}</span></Button></li>{/each}</ul>
       {/if}
       {#if legacyAvailable}<p>An older draft also needs recovery. Your other drafts are unchanged.</p><button onclick={recoverOldNew}>Recover older draft as new</button>{/if}
@@ -321,5 +321,5 @@
 {/if}
 
 <style>
-  .line-row{display:flex;align-items:center;gap:.25rem;margin:.4rem 0}.line-row label{flex:1;margin:0;min-width:0}.line-row input{width:100%}.ghost{display:inline-flex;align-items:center;gap:.3rem;background:transparent;border-color:transparent;padding:.35rem .5rem;font-size:.9rem}.toolbar{flex-wrap:wrap}.draft-actions{margin-bottom:1rem}.draft-badge{font-size:.85rem;color:var(--muted)}.draft-list{list-style:none;padding:0}.draft-list li{display:flex;justify-content:space-between;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--border)}.draft-list small{display:block}.submit-wrapper{display:inline-flex}.submit-wrapper:focus-visible{outline:2px solid currentColor;outline-offset:4px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}h2 small{font-size:.7em;font-weight:normal}
+  .line-row{display:flex;align-items:center;gap:.25rem;margin:.4rem 0}.line-row label{flex:1;margin:0;min-width:0}.line-row input{width:100%}.ghost{display:inline-flex;align-items:center;gap:.3rem;background:transparent;border-color:transparent;padding:.35rem .5rem;font-size:.9rem}.toolbar{flex-wrap:wrap}.draft-actions{margin-bottom:1rem}.draft-badge{font-size:.85rem;color:var(--muted)}.draft-list{list-style:none;padding:0}.draft-list li{display:flex;justify-content:space-between;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--border)}.draft-list small{display:block}.submit-wrapper{display:inline-flex}.submit-wrapper:focus-visible{outline:2px solid currentColor;outline-offset:4px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 </style>

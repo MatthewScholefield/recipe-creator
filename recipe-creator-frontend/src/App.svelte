@@ -12,6 +12,7 @@
   import Button from './ui/Button.svelte';
   import BackLink from './ui/BackLink.svelte';
   import Icon from './ui/Icon.svelte';
+  import IconButton from './ui/IconButton.svelte';
   import Spinner from './ui/Spinner.svelte';
   let route = $state(location.pathname + location.search);
   let pairingVersion = $state(0);
@@ -42,7 +43,7 @@
   <form class="search" onsubmit={(event) => {event.preventDefault(); navigate(browseUrl({q: search, tags: params.getAll('tag'), saved: pathname === '/saved'}));}}>
     <label class="sr-only" for="search">Search recipes</label><input id="search" type="search" bind:value={search} placeholder="Search recipes"><button aria-label="Search recipes"><Icon name="search" /></button>
   </form>
-  <nav aria-label="Main"><Button variant="primary" size="sm" href="/new"><Icon name="plus" size={18} /> Add recipe</Button><Button variant="secondary" size="sm" href="/saved"><Icon name="bookmark" size={18} /> Saved</Button></nav>
+  <nav aria-label="Main"><Button variant="primary" size="sm" href="/new"><Icon name="plus" size={18} /> Add recipe</Button><IconButton href="/saved" ariaLabel="Saved recipes" title="Saved recipes"><Icon name="bookmark" size={18} /></IconButton></nav>
   <div class="profile-menu">
     <Dropdown label="Profile menu">
       {#snippet trigger(open)}<button type="button" class:anonymous={!user} aria-label="Profile menu" aria-haspopup="menu" aria-expanded={open}><Icon name="user" /><span>{user?.display_name || 'Anonymous'}</span><Icon name="chevron-down" size={16} /></button>{/snippet}

@@ -47,7 +47,7 @@
 {#if safeUrl(recipe.source_url)}<p><Button variant="ghost" size="sm" href={safeUrl(recipe.source_url)} target="_blank" rel="noopener noreferrer"><Icon name="external-link" size={16} />Original source</Button></p>{/if}
 {#if recipe.modifications}<section><h2>Our modifications</h2><p class="prose">{recipe.modifications}</p></section>{/if}
 <div class="toolbar no-print">
-  <Button variant="ghost" size="sm" ariaLabel={bookmarks.includes(recipe.id) ? 'Remove saved recipe' : 'Save for later'} onclick={() => bookmarks = bookmarks.includes(recipe!.id) ? bookmarks.filter(value => value !== recipe!.id) : [...bookmarks, recipe!.id]}><Icon name="bookmark" label={bookmarks.includes(recipe.id) ? 'Saved' : 'Save for later'} /></Button>
+  <Button variant="ghost" size="sm" ariaLabel={bookmarks.includes(recipe.id) ? 'Remove saved recipe' : 'Save for later'} onclick={() => bookmarks = bookmarks.includes(recipe!.id) ? bookmarks.filter(value => value !== recipe!.id) : [...bookmarks, recipe!.id]}><Icon name="bookmark" fill={bookmarks.includes(recipe.id) ? 'currentColor' : undefined} label={bookmarks.includes(recipe.id) ? 'Saved' : 'Save for later'} /></Button>
   <Button variant="ghost" size="sm" onclick={share}><Icon name="share" size={17} />Share</Button>
   <Button variant="ghost" size="sm" onclick={() => window.print()}>Print</Button>
   <button class="small-control" aria-label={awake ? 'Stop keeping screen awake' : 'Keep screen awake'} aria-pressed={awake} onclick={wake}><Icon name="edit" label={awake ? 'Screen staying awake' : 'Keep screen awake'} /></button>
