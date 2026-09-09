@@ -56,13 +56,17 @@ describe('ingredient line editing', () => {
     expect(withoutEmptyIngredients(result).ingredient_groups[0].ingredients).toHaveLength(2);
     expect(() => applyIngredientLines(draft, snapshot, [{...snapshot[0], text:'changed', method:'llm', ingredient:row}])).toThrow(/did not match/);
   });
-  it('retains legacy IDs and separately authored prose when reorganizing', () => {
-    const draft = {...blank(), description:' authored ', directions:'Do not rewrite', notes:' notes ', unclassified:'odd', ingredient_groups:[{id:'legacy-group',name:'',ingredients:[old]}]};
-    const result = applyParse(draft, {source_hash:'hash', source_text:'', description:'model', directions:'model', notes:'model', unclassified:'model', ingredient_groups:[{id:'new-group',name:'',ingredients:[{...old,id:'new-row'}]}],warnings:[]});
-    expect(result.ingredient_groups[0].id).toBe('legacy-group'); expect(result.ingredient_groups[0].ingredients[0]).toEqual(old);
+  it('retains matching legacy IDs but never restores ingredients omitted by the organizer', () => {
+    const divider = {...ingredient(), id:'divider', original_text:'=== section ==='};
+    const draft = {...blank(), description:' authored ', directions:'Do not rewrite', notes:' notes ', unclassified:'odd',
+      ingredient_groups:[{id:'legacy-group',name:'Dough',ingredients:[old, divider]}]};
+    const result = applyParse(draft, {source_hash:'hash', source_text:'', description:'model', directions:'model', notes:'model', unclassified:'model',
+      ingredient_groups:[{id:'new-group',name:'Dough',ingredients:[{...old,id:'new-row'}]}],warnings:[]});
+    expect(result.ingredient_groups[0].id).toBe('legacy-group');
+    expect(result.ingredient_groups[0].ingredients).toEqual([old]);
     expect(result).toMatchObject({description:draft.description,directions:draft.directions,notes:draft.notes,unclassified:draft.unclassified});
     const empty = applyParse(draft, {source_hash:'hash',source_text:'',description:'',directions:'',notes:'',unclassified:'',ingredient_groups:[],warnings:[]});
-    expect(empty.ingredient_groups).toEqual(draft.ingredient_groups);
+    expect(empty.ingredient_groups).toEqual([]);
   });
   it('repairs duplicate parser IDs without dropping ingredient rows', () => {
     const draft = {...blank(), source_text: 'raw'};

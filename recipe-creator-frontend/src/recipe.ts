@@ -28,7 +28,7 @@ function claimUniqueId(candidate: string, used: Set<string>): string {
   return replacement;
 }
 export function applyParse(draft: RecipeDraft, result: ParseResult): RecipeDraft {
-  // Reorganizing retained text must not replace separately authored fields or legacy IDs.
+  // Reuse IDs and derived metadata only for rows the organizer explicitly retained.
   const oldRows = draft.ingredient_groups.flatMap(group => group.ingredients);
   const usedRows = new Set<Ingredient>(), usedGroups = new Set<IngredientGroup>();
   const groups = result.ingredient_groups.map(group => {
@@ -43,15 +43,8 @@ export function applyParse(draft: RecipeDraft, result: ParseResult): RecipeDraft
     if (old) usedGroups.add(old);
     return {...group, id: old?.id ?? group.id, ingredients};
   });
-  // An organizer classifies source; it cannot silently delete separately authored legacy rows.
-  for (const old of draft.ingredient_groups) {
-    const remaining = old.ingredients.filter(row => !usedRows.has(row));
-    const group = groups.find(group => group.id === old.id);
-    if (group) group.ingredients.push(...remaining);
-    else if (remaining.length || !old.ingredients.length) groups.push({...old, ingredients: remaining});
-  }
   // A malformed parser response or legacy in-memory draft must not leak duplicate keyed IDs
-  // into the next ingredient preview or save request. Preserve every row; repair only collisions.
+  // into the next ingredient preview or save request. Repair collisions without adding rows.
   const groupIds = new Set<string>(), rowIds = new Set<string>();
   const normalizedGroups = groups.map(group => ({
     ...group,

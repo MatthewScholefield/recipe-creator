@@ -129,30 +129,23 @@ async def test_ingredient_batch_one_request_no_transport_retries(monkeypatch):
     assert calls == [1]
 
 
-async def test_bagel_blend_markers_are_removed_without_erasing_group_labels():
-    source = (
-        "2 ¾ cups (385 g) all purpose gluten free flour blend\n"
-        "0=== =====Start GF Flour ==== ===\n"
-        "115.5 g White Rice Flour\n"
-        "0=== =====End GF Flour ===== ===\n"
-        "1 tablespoon (9 g) instant yeast"
-    )
+async def test_ingredient_groups_require_labels_and_use_model_organization_directly():
+    source = "Filling:\n2 apples\nTopping:\n1 cup oats"
     calls = []
 
     async def respond(_messages, info):
         calls.append(1)
-        dough_name = "" if len(calls) == 1 else "Dough"
+        filling_name = "" if len(calls) == 1 else "Filling"
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, output(
             ingredient_groups=[
-                {"name": dough_name, "ingredients": [
-                    {"original_text": "2 ¾ cups (385 g) all purpose gluten free flour blend"},
-                    {"original_text": "0=== =====Start GF Flour ==== ==="},
-                    {"original_text": "1 tablespoon (9 g) instant yeast"},
-                ]},
-                {"name": "GF Flour Blend", "ingredients": [
-                    {"original_text": "115.5 g White Rice Flour"},
-                    {"original_text": "0=== =====End GF Flour ===== ==="},
-                ]},
+                {
+                    "name": filling_name,
+                    "ingredients": [{"original_text": "2 apples"}],
+                },
+                {
+                    "name": "Topping",
+                    "ingredients": [{"original_text": "1 cup oats"}],
+                },
             ],
         ))])
 
@@ -160,17 +153,12 @@ async def test_bagel_blend_markers_are_removed_without_erasing_group_labels():
         result = await parse_recipe(source, Settings())
     assert len(calls) == 2
     assert result["ingredient_groups"] == [
-        {"name": "Dough", "ingredients": [
-            {"original_text": "2 ¾ cups (385 g) all purpose gluten free flour blend"},
-            {"original_text": "1 tablespoon (9 g) instant yeast"},
-        ]},
-        {"name": "GF Flour Blend", "ingredients": [
-            {"original_text": "115.5 g White Rice Flour"},
-        ]},
+        {"name": "Filling", "ingredients": [{"original_text": "2 apples"}]},
+        {"name": "Topping", "ingredients": [{"original_text": "1 cup oats"}]},
     ]
 
 
-async def test_single_group_label_survives_parse_postprocessing():
+async def test_single_group_label_is_returned():
     expected = output(ingredient_groups=[{
         "name": "Ingredients",
         "ingredients": [{"original_text": "2 eggs"}],

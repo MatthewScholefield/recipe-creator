@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from weakref import WeakKeyDictionary
@@ -78,12 +77,13 @@ parser_agent = Agent(
         "Preserve a recipe heading in description rather than adding a title field or silently "
         "dropping it. Treat ingredient output as a clean recipe representation, not a source-line "
         "transcript: freely regroup, reorder, split, merge, and reformat ingredient text to correct "
-        "obvious input mistakes while retaining the ingredient facts. Omit decorative dividers, "
-        "section-marker syntax, numbering artifacts, and other non-ingredient text; there is no "
-        "requirement to account for every source character. Paired 'Start X' and 'End X' dividers "
-        "describe a nested ingredient subgroup: put only the lines between them in group X. Keep "
-        "the ingredient immediately before 'Start X' in its surrounding recipe section; it uses "
-        "the blend and is not one of the blend's components. Give every ingredient group a concise, "
+        "obvious input mistakes while retaining the ingredient facts. Infer ingredient structure "
+        "semantically from the whole recipe. Headings, delimiters, list markers, numbering, and "
+        "annotations used only to communicate structure are metadata, not ingredients. When the "
+        "source embeds the constituents of a mix, sauce, topping, or other component, place those "
+        "constituents in a clearly named group while keeping ingredients that use that component in "
+        "their surrounding recipe group. Do not depend on exact marker spelling or line positions, "
+        "and do not account for every source character. Give every ingredient group a concise, "
         "nonempty name inferred from its role, using 'Ingredients' for a single or otherwise generic "
         "group. Preserve useful subgroup distinctions and group order when it is meaningful. "
         "Explicitly empty strings and lists represent absent non-ingredient sections. Do not return "
@@ -120,18 +120,6 @@ def _runtime(settings: Settings):
     return cache[key]
 
 
-def _clean_ingredient_groups(groups: list[dict]) -> list[dict]:
-    """Discard marker syntax that cannot be an ingredient; retain model grouping and wording."""
-    cleaned = []
-    for group in groups:
-        ingredients = [
-            ingredient
-            for ingredient in group["ingredients"]
-            if not re.fullmatch(r"\s*(?:0\s*)?=+.*=+\s*", ingredient["original_text"])
-        ]
-        if ingredients:
-            cleaned.append({**group, "ingredients": ingredients})
-    return cleaned
 
 
 async def parse_recipe(source_text: str, settings: Settings) -> dict:
@@ -162,7 +150,6 @@ async def parse_recipe(source_text: str, settings: Settings) -> dict:
                         result = event.result
                         break
     output = result.output.model_dump()
-    output["ingredient_groups"] = _clean_ingredient_groups(output["ingredient_groups"])
     return {
         **output,
         "source_hash": source_hash(source_text),
