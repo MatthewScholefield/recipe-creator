@@ -54,6 +54,20 @@ it('organizes anonymously in two guarded stages and shows the bottom name toolti
   expect(fetcher.mock.calls.some(([url]) => String(url).includes('/identity'))).toBe(false);
   expect(screen.getByRole('button',{name:'Publish recipe'})).toBeDisabled();
 });
+it('repairs duplicate parser IDs before the ingredient preview request', async () => {
+  const value = localDraft();
+  const parsed = parseResult();
+  parsed.ingredient_groups[0].ingredients.push({...parsed.ingredient_groups[0].ingredients[0], original_text: 'salt'});
+  const fetcher = mockApi((url, init) => url === '/api/parse' ? parsed : lineResult(init!.body as string), false);
+  render(Editor,{draftId:value.id,navigate:vi.fn()}); await screen.findByLabelText('Paste or write your recipe');
+  await fireEvent.click(screen.getByRole('button',{name:'Organize'}));
+  await waitFor(() => expect(fetcher.mock.calls.filter(([url]) => url === '/api/ingredients/parse')).toHaveLength(1));
+  const preview = fetcher.mock.calls.find(([url]) => url === '/api/ingredients/parse')!;
+  // The mock captures the request boundary; the payload shape is the contract under test.
+  const previewBody = JSON.parse(preview[1]!.body as string) as {lines:{id:string}[]};
+  const ids = previewBody.lines.map(line => line.id);
+  expect(new Set(ids).size).toBe(ids.length);
+});
 it('ignores whole-recipe results after typing and retains exact source on undo', async () => {
   const value = localDraft(); let finish!: (value: unknown) => void;
   mockApi(url => url === '/api/parse' ? new Promise(resolve => finish = resolve) : recipe);

@@ -59,6 +59,21 @@ describe('ingredient line editing', () => {
     const empty = applyParse(draft, {source_hash:'hash',source_text:'',description:'',directions:'',notes:'',unclassified:'',ingredient_groups:[],warnings:[]});
     expect(empty.ingredient_groups).toEqual(draft.ingredient_groups);
   });
+  it('repairs duplicate parser IDs without dropping ingredient rows', () => {
+    const draft = {...blank(), source_text: 'raw'};
+    const result = applyParse(draft, {
+      source_hash: 'hash', source_text: 'raw', description: '', directions: '', notes: '', unclassified: '', warnings: [],
+      ingredient_groups: [
+        {id: 'same-group', name: '', ingredients: [{id: 'same-row', original_text: '2 eggs', quantity: null, quantity_max: null, unit: '', name: '', preparation: '', optional: false, grams: null}]},
+        {id: 'same-group', name: '', ingredients: [{id: 'same-row', original_text: 'salt', quantity: null, quantity_max: null, unit: '', name: '', preparation: '', optional: false, grams: null}]},
+      ],
+    });
+    const groups = result.ingredient_groups;
+    const rows = groups.flatMap(group => group.ingredients);
+    expect(new Set(groups.map(group => group.id)).size).toBe(groups.length);
+    expect(new Set(rows.map(row => row.id)).size).toBe(rows.length);
+    expect(rows.map(row => row.original_text)).toEqual(['2 eggs', 'salt']);
+  });
 });
 describe('editor tag validation', () => {
   it('normalizes newly selected tags without treating cuisine as meal types', () => {

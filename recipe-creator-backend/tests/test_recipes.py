@@ -58,6 +58,23 @@ def test_search_prototype_semantics():
     assert recipes.search_terms(" Red  soup tag:dinner -tag:lunch -incomplete", {"dinner", "lunch"}) == ("red soup", ["dinner", "lunch"], [])
     assert recipes.search_terms("foo:x tag:missing tag:", set()) == ("", [], ["Unknown search fields: foo", "Tags not found: missing"])
 
+def test_groups_output_repairs_duplicate_ids():
+    groups = [
+        {"id": "same-group", "name": "", "ingredients": [
+            {"id": "same-row", "original_text": "2 eggs"},
+            {"id": "same-row", "original_text": "salt"},
+        ]},
+        {"id": "same-group", "name": "", "ingredients": [
+            {"id": "same-row", "original_text": "pepper"},
+        ]},
+    ]
+    output = recipes._groups_output(groups, "seed")
+    group_ids = [group["id"] for group in output]
+    row_ids = [row["id"] for group in output for row in group["ingredients"]]
+    assert len(set(group_ids)) == len(group_ids)
+    assert len(set(row_ids)) == len(row_ids)
+    assert [row["original_text"] for group in output for row in group["ingredients"]] == ["2 eggs", "salt", "pepper"]
+
 
 def test_catalog_projection_is_strict_and_normalizes_record_ids():
     row = RecipeCatalogProjection.model_validate({"id": "recipes:soup", "title": "Soup", "description": "",

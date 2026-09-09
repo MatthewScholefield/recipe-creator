@@ -1,4 +1,4 @@
-import type { Ingredient, RecipeDraft, ParseResult } from './types';
+import type { Ingredient, IngredientGroup, RecipeDraft, ParseResult } from './types';
 export function blank(mode: RecipeDraft['mode'] = 'text'): RecipeDraft { return { title: '', source_text: '', mode, description: '', ingredient_groups: [], directions: '', notes: '', unclassified: '', tags: [], yield_amount: null, yield_unit: '', source_url: '', modifications: '' }; }
 export function ingredient(): Ingredient { return { id: crypto.randomUUID(), original_text: '', quantity: null, quantity_max: null, unit: '', name: '', preparation: '', optional: false, grams: null }; }
 const fractions: Record<string, string> = { '½':'1/2','¼':'1/4','¾':'3/4','⅓':'1/3','⅔':'2/3','⅛':'1/8','⅜':'3/8','⅝':'5/8','⅞':'7/8' };
@@ -20,30 +20,45 @@ export function ingredientText(row: Ingredient, scale = 1, grams = false): strin
 export function formatRecipe(draft: RecipeDraft): string {
   return [draft.description, draft.ingredient_groups.length ? 'Ingredients\n' + draft.ingredient_groups.map(group => [group.name ? `=== ${group.name} ===` : '', ...group.ingredients.map(row => ingredientText(row))].filter(Boolean).join('\n')).join('\n\n') : '', draft.directions ? `Directions\n${draft.directions}` : '', draft.notes ? `Notes\n${draft.notes}` : '', draft.unclassified || ''].filter(Boolean).join('\n\n');
 }
+function claimUniqueId(candidate: string, used: Set<string>): string {
+  if (candidate && !used.has(candidate)) { used.add(candidate); return candidate; }
+  let replacement = crypto.randomUUID();
+  while (used.has(replacement)) replacement = crypto.randomUUID();
+  used.add(replacement);
+  return replacement;
+}
 export function applyParse(draft: RecipeDraft, result: ParseResult): RecipeDraft {
   // Reorganizing retained text must not replace separately authored fields or legacy IDs.
   const oldRows = draft.ingredient_groups.flatMap(group => group.ingredients);
-  const used = new Set<string>(), usedGroups = new Set<string>();
+  const usedRows = new Set<Ingredient>(), usedGroups = new Set<IngredientGroup>();
   const groups = result.ingredient_groups.map(group => {
     const ingredients = group.ingredients.map(output => {
       const row: Ingredient = {...output, quantity: output.quantity ?? null, quantity_max: output.quantity_max ?? null, grams: output.grams ?? null};
-      const old = oldRows.find(candidate => !used.has(candidate.id) && ingredientLine(candidate) === ingredientLine(row));
-      if (old) { used.add(old.id); return old; }
+      const old = oldRows.find(candidate => !usedRows.has(candidate) && ingredientLine(candidate) === ingredientLine(row));
+      if (old) { usedRows.add(old); return old; }
       return row;
     });
-    const old = draft.ingredient_groups.find(candidate => !usedGroups.has(candidate.id) && (candidate.id === group.id ||
+    const old = draft.ingredient_groups.find(candidate => !usedGroups.has(candidate) && (candidate.id === group.id ||
       (candidate.name === group.name && candidate.ingredients.some(row => ingredients.some(item => item.id === row.id)))));
-    if (old) usedGroups.add(old.id);
+    if (old) usedGroups.add(old);
     return {...group, id: old?.id ?? group.id, ingredients};
   });
   // An organizer classifies source; it cannot silently delete separately authored legacy rows.
   for (const old of draft.ingredient_groups) {
-    const remaining = old.ingredients.filter(row => !used.has(row.id));
+    const remaining = old.ingredients.filter(row => !usedRows.has(row));
     const group = groups.find(group => group.id === old.id);
     if (group) group.ingredients.push(...remaining);
     else if (remaining.length || !old.ingredients.length) groups.push({...old, ingredients: remaining});
   }
-  return {...draft, description: draft.description || result.description, ingredient_groups: groups,
+  // A malformed parser response or legacy in-memory draft must not leak duplicate keyed IDs
+  // into the next ingredient preview or save request. Preserve every row; repair only collisions.
+  const groupIds = new Set<string>(), rowIds = new Set<string>();
+  const normalizedGroups = groups.map(group => ({
+    ...group,
+    id: claimUniqueId(group.id, groupIds),
+    ingredients: group.ingredients.map(row => ({...row, id: claimUniqueId(row.id, rowIds)})),
+  }));
+  return {...draft, description: draft.description || result.description, ingredient_groups: normalizedGroups,
     directions: draft.directions || result.directions, notes: draft.notes || result.notes,
     unclassified: draft.unclassified || result.unclassified, mode: 'structured', source_text: draft.source_text};
 }

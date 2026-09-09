@@ -216,10 +216,25 @@ def _stable_id(seed, kind, index):
     return uuid5(NAMESPACE_URL, f"recipe-creator:{seed}:{kind}:{index}").hex
 
 
+def _unique_stable_id(candidate, seed, kind, index, used):
+    value = candidate or _stable_id(seed, kind, index)
+    if value not in used:
+        used.add(value)
+        return value
+    attempt = 1
+    while True:
+        value = _stable_id(seed, f"{kind}:collision", f"{index}:{attempt}")
+        if value not in used:
+            used.add(value)
+            return value
+        attempt += 1
+
+
 def _groups_output(groups, seed):
     result = []
+    group_ids, row_ids = set(), set()
     for gi, group in enumerate(groups):
-        gid = group.get("id") or _stable_id(seed, "group", gi)
+        gid = _unique_stable_id(group.get("id"), seed, "group", gi, group_ids)
         rows = []
         for ii, ingredient in enumerate(group.get("ingredients", [])):
             item = {key: ingredient.get(key, False if key == "optional" else None if key in {"quantity", "quantity_max"} else "") for key in AUTHORED}
@@ -228,7 +243,7 @@ def _groups_output(groups, seed):
                 if item[key] is not None:
                     item[key] = str(item[key])
             item["unit"] = item["unit"] or ""
-            item["id"] = ingredient.get("id") or _stable_id(seed, gid, ii)
+            item["id"] = _unique_stable_id(ingredient.get("id"), seed, gid, ii, row_ids)
             grams = ingredient.get("grams")
             provenance = ingredient.get("grams_provenance", "")
             basis = provenance.get("basis", provenance.get("source", "")) if isinstance(provenance, dict) else provenance
