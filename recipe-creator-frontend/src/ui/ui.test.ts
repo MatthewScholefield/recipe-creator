@@ -92,7 +92,12 @@ it('renders shared tags as text, links, and accessible removable buttons', async
   const link = screen.getByRole('link', {name: 'Remove Dessert'});
   expect(link).toHaveAttribute('href', '/browse?tag=Dessert');
   expect(link.querySelector('button')).toBeNull();
+  await fireEvent.click(screen.getByText('Dessert'));
+  expect(onclick).not.toHaveBeenCalled();
+  expect(link).not.toHaveTextContent('Dessert');
   render(Tag, {label: 'Quick', removable: true, onclick});
+  await fireEvent.click(screen.getByText('Quick'));
+  expect(onclick).not.toHaveBeenCalled();
   await fireEvent.click(screen.getByRole('button', {name: 'Remove Quick'}));
   expect(onclick).toHaveBeenCalledOnce();
   expect(container.querySelector('.tag svg')).toBeNull();

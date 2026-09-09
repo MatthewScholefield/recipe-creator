@@ -138,7 +138,7 @@
 
 <section class="tag-filters" aria-label="Recipe filters"><div class="quick-tags" use:clipQuickTags={quickTags}>{#each quickTags as tag}<Tag label={tag} href={link([...selected, tag])} />{/each}</div><TagPicker tags={tags} selected={selected} label="Search tags" placeholder="Search tags" compact allowCreate={false} onchange={setTags} />{#if tagError}<p class="notice" role="status">{tagError}</p>{/if}</section>
 
-{#if selected.length || query}<div class="active-filters" aria-label="Active filters">{#if query}<Tag label={`Search: ${query}`} removable href={browseUrl({q: '', tags: selected, saved: savedOnly})} />{/if}{#each selected as tag}<Tag label={tag} removable href={link(selected.filter(value => value !== tag))} />{/each}<button type="button" onclick={clearFilters}>Clear all</button></div>{/if}
+{#if selected.length || query}<div class="active-filters" aria-label="Active filters">{#if query}<Tag label={`Search: ${query}`} removable href={browseUrl({q: '', tags: selected, saved: savedOnly})} />{/if}{#each selected as tag}<Tag label={tag} removable href={link(selected.filter(value => value !== tag))} />{/each}</div>{/if}
 
 {#if error}<div role="alert" class="notice error">{error} <button onclick={() => savedOnly ? void loadSaved(failedBatches.length ? failedBatches : null) : void fetchPage(items.length === 0)}>Try again</button></div>{/if}
 {#each warnings as warning}<p class="notice" role="status">{warning}</p>{/each}
