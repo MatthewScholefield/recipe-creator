@@ -18,9 +18,9 @@
   import type { Component } from 'svelte';
 
   export type IconName = 'search' | 'x' | 'chevron-down' | 'check' | 'plus' | 'loader' | 'user' | 'trash' | 'edit' | 'bookmark' | 'share' | 'arrow-left' | 'arrow-right' | 'external-link' | 'shield-check' | 'git-compare';
-  interface Props { name: IconName; size?: number; strokeWidth?: number; fill?: string; label?: string; }
-  let { name, size = 20, strokeWidth = 2, fill = 'none', label }: Props = $props();
+  interface Props { name: IconName; size?: number; strokeWidth?: number; fill?: string; color?: string; label?: string; }
+  let { name, size = 20, strokeWidth = 2, fill = 'none', color = 'currentColor', label }: Props = $props();
   const icons: Record<IconName, Component> = {search: Search, x: X, 'chevron-down': ChevronDown, check: Check, plus: Plus, loader: LoaderCircle, user: User, trash: Trash2, edit: Pencil, bookmark: Bookmark, share: Share2, 'arrow-left': ArrowLeft, 'arrow-right': ArrowRight, 'external-link': ExternalLink, 'shield-check': ShieldCheck, 'git-compare': GitCompare};
   let Selected = $derived(icons[name]);
 </script>
-<Selected {size} {strokeWidth} {fill} aria-label={label} aria-hidden={label ? undefined : 'true'} />
+<Selected {size} {strokeWidth} {fill} {color} aria-label={label} aria-hidden={label ? undefined : 'true'} />
