@@ -22,6 +22,11 @@ describe('lossless recipe representations', () => {
     expect(text).toContain(draft.description); expect(text).toContain(draft.directions); expect(text).toContain(draft.notes); expect(text).toContain(draft.unclassified);
     expect(text.match(/=== Sauce ===/g)).toHaveLength(2); expect(text.match(/salt, to taste/g)).toHaveLength(3);
   });
+  it('keeps a lone section label in data but omits it from formatted display text', () => {
+    const draft = {...blank('structured'), ingredient_groups: [{id: 'only', name: 'Ingredients', ingredients: [{...ingredient(), original_text: '2 eggs'}]}]};
+    expect(draft.ingredient_groups[0].name).toBe('Ingredients');
+    expect(formatRecipe(draft)).toBe('Ingredients\n2 eggs');
+  });
   it('retains the original source and unknown regions on parse', () => {
     const draft = {...blank(), source_text: 'Original source\n  '};
     const result = applyParse(draft, {source_hash:'hash', source_text:draft.source_text, description:'', ingredient_groups:[], directions:'exact', notes:' note ', unclassified:'unknown', warnings:[]});

@@ -4,7 +4,7 @@ import Detail from './Detail.svelte';
 import { blank, ingredient } from './recipe';
 
 const identity = {user:{id:'u1',display_name:'Cook',state:'active',photo_trusted:false},device_id:'d1',admin:false,csrf_token:'csrf'};
-const recipe = {...blank('structured'),id:'r1',title:'Soup',revision:2,owner_id:'u1',author_name:'Cook',can_edit:true,enrichment_status:'complete',directions:'Simmer.',ingredient_groups:[{id:'g1',name:'',ingredients:[{...ingredient(),id:'i1',name:'flour',quantity:'1',unit:'cup',original_text:'1 cup flour',grams:{amount:120,low:null,high:null,estimated:false,basis:'flour'}}]}]};
+const recipe = {...blank('structured'),id:'r1',title:'Soup',revision:2,owner_id:'u1',author_name:'Cook',can_edit:true,enrichment_status:'complete',directions:'Simmer.',ingredient_groups:[{id:'g1',name:'Ingredients',ingredients:[{...ingredient(),id:'i1',name:'flour',quantity:'1',unit:'cup',original_text:'1 cup flour',grams:{amount:120,low:null,high:null,estimated:false,basis:'flour'}}]}]};
 
 function mockApi() { const fetcher = vi.fn(async (url: string | URL, init?: RequestInit) => {
   const path = String(url);
@@ -21,6 +21,7 @@ it('opens the editor through the detail action without relying on global link ha
   const edit = screen.getByRole('link',{name:'Edit'});
   await fireEvent.click(edit,{button:-1});
   expect(navigate).toHaveBeenCalledWith('/recipes/r1/edit');
+  expect(screen.queryByRole('heading',{name:'Ingredients',level:3})).not.toBeInTheDocument();
 });
 
 it('shows the active wake-lock state with a filled accent icon', async () => {

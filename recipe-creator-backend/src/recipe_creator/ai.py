@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from weakref import WeakKeyDictionary
@@ -79,7 +80,10 @@ parser_agent = Agent(
         "transcript: freely regroup, reorder, split, merge, and reformat ingredient text to correct "
         "obvious input mistakes while retaining the ingredient facts. Omit decorative dividers, "
         "section-marker syntax, numbering artifacts, and other non-ingredient text; there is no "
-        "requirement to account for every source character. Give every ingredient group a concise, "
+        "requirement to account for every source character. Paired 'Start X' and 'End X' dividers "
+        "describe a nested ingredient subgroup: put only the lines between them in group X. Keep "
+        "the ingredient immediately before 'Start X' in its surrounding recipe section; it uses "
+        "the blend and is not one of the blend's components. Give every ingredient group a concise, "
         "nonempty name inferred from its role, using 'Ingredients' for a single or otherwise generic "
         "group. Preserve useful subgroup distinctions and group order when it is meaningful. "
         "Explicitly empty strings and lists represent absent non-ingredient sections. Do not return "
@@ -116,6 +120,20 @@ def _runtime(settings: Settings):
     return cache[key]
 
 
+def _clean_ingredient_groups(groups: list[dict]) -> list[dict]:
+    """Discard marker syntax that cannot be an ingredient; retain model grouping and wording."""
+    cleaned = []
+    for group in groups:
+        ingredients = [
+            ingredient
+            for ingredient in group["ingredients"]
+            if not re.fullmatch(r"\s*(?:0\s*)?=+.*=+\s*", ingredient["original_text"])
+        ]
+        if ingredients:
+            cleaned.append({**group, "ingredients": ingredients})
+    return cleaned
+
+
 async def parse_recipe(source_text: str, settings: Settings) -> dict:
     """Return model-organized fields with the exact source retained separately."""
     request = ParseRequest(source_text=source_text)
@@ -144,10 +162,7 @@ async def parse_recipe(source_text: str, settings: Settings) -> dict:
                         result = event.result
                         break
     output = result.output.model_dump()
-    # The model always names groups so multi-section recipes remain intelligible. A lone
-    # group is already introduced by the UI's Ingredients heading, so suppress its duplicate label.
-    if len(output["ingredient_groups"]) == 1:
-        output["ingredient_groups"][0]["name"] = ""
+    output["ingredient_groups"] = _clean_ingredient_groups(output["ingredient_groups"])
     return {
         **output,
         "source_hash": source_hash(source_text),

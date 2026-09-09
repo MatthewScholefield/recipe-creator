@@ -18,7 +18,7 @@ export function ingredientText(row: Ingredient, scale = 1, grams = false): strin
   return [scaled(row.quantity, scale) + range, row.unit, row.name].filter(Boolean).join(' ') + (row.preparation ? `, ${row.preparation}` : '') + (row.optional ? ' (optional)' : '');
 }
 export function formatRecipe(draft: RecipeDraft): string {
-  return [draft.description, draft.ingredient_groups.length ? 'Ingredients\n' + draft.ingredient_groups.map(group => [group.name ? `=== ${group.name} ===` : '', ...group.ingredients.map(row => ingredientText(row))].filter(Boolean).join('\n')).join('\n\n') : '', draft.directions ? `Directions\n${draft.directions}` : '', draft.notes ? `Notes\n${draft.notes}` : '', draft.unclassified || ''].filter(Boolean).join('\n\n');
+  return [draft.description, draft.ingredient_groups.length ? 'Ingredients\n' + draft.ingredient_groups.map(group => [group.name && draft.ingredient_groups.length > 1 ? `=== ${group.name} ===` : '', ...group.ingredients.map(row => ingredientText(row))].filter(Boolean).join('\n')).join('\n\n') : '', draft.directions ? `Directions\n${draft.directions}` : '', draft.notes ? `Notes\n${draft.notes}` : '', draft.unclassified || ''].filter(Boolean).join('\n\n');
 }
 function claimUniqueId(candidate: string, used: Set<string>): string {
   if (candidate && !used.has(candidate)) { used.add(candidate); return candidate; }
