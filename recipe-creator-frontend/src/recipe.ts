@@ -10,16 +10,28 @@ export function quantity(value: string | null | undefined): number | null {
   return m && Number(m[3]) !== 0 ? Number(m[1] || 0) + Number(m[2]) / Number(m[3]) : null;
 }
 export function scaled(value: string | null, scale: number): string { const number = quantity(value); return number === null || !Number.isFinite(scale) || scale <= 0 ? value || '' : new Intl.NumberFormat('en', {maximumFractionDigits: 3}).format(number * scale); }
+const gramFormatter = new Intl.NumberFormat('en', {maximumFractionDigits: 1});
 function gramNumber(value: unknown): number | null {
   if ((typeof value !== 'number' && typeof value !== 'string') || quantity(String(value)) === null) return null;
   return Number(value);
 }
-export function gramText(row: Ingredient, scale = 1): string | null {
-  const amount = gramNumber(row.grams?.amount);
-  if (amount !== null) return `${scaled(String(amount), scale)} g`;
+export function gramValues(row: Ingredient, scale = 1): {amount: number; uncertainty: number | null} | null {
+  const explicit = gramNumber(row.grams?.amount);
   const low = gramNumber(row.grams?.low), high = gramNumber(row.grams?.high);
-  if (low === null || high === null) return null;
-  return low === high ? `${scaled(String(low), scale)} g` : `${scaled(String(low), scale)}–${scaled(String(high), scale)} g`;
+  const amount = explicit ?? (low !== null && high !== null ? (low + high) / 2 : null);
+  if (amount === null) return null;
+  const uncertainty = low !== null && high !== null && high > low ? (high - low) / 2 * scale : null;
+  return {amount: amount * scale, uncertainty};
+}
+export function gramText(row: Ingredient, scale = 1): string | null {
+  const values = gramValues(row, scale);
+  return values ? `${gramFormatter.format(values.amount)} g` : null;
+}
+export function gramEstimateText(row: Ingredient, scale = 1): string | null {
+  const values = gramValues(row, scale);
+  if (!values) return null;
+  const uncertainty = values.uncertainty === null ? '' : ` ± ${gramFormatter.format(values.uncertainty)}`;
+  return `${gramFormatter.format(values.amount)}${uncertainty} g`;
 }
 export function ingredientText(row: Ingredient, scale = 1, grams = false): string {
   const weight = gramText(row, scale);

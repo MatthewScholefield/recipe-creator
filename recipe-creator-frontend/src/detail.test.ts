@@ -55,13 +55,13 @@ it('keeps secondary actions subtle and confirms recipe deletion in a modal', asy
   expect(navigate).toHaveBeenCalledWith('/');
 });
 
-it('opens scaling controls and anchors original amounts to gram amounts only', async () => {
+it('shows one gram amount and puts the original amount in its tooltip', async () => {
   mockApi(); render(Detail,{recipeId:'r1',navigate:vi.fn()}); await screen.findByRole('heading',{name:'Soup'});
   expect(screen.queryByText('Original & weight details')).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Adjust ingredient scale'}));
   await fireEvent.click(screen.getByRole('button',{name:'Grams'}));
   const grams = screen.getByText('120 g'); await fireEvent.mouseEnter(grams.parentElement!);
-  expect(await screen.findByRole('tooltip')).toHaveTextContent('As written: 1 cup flour');
+  expect(await screen.findByRole('tooltip')).toHaveTextContent('Original: 1 cup flour Weight: 120 g');
 });
 it('flags unscalable ingredients and explains unavailable gram conversions', async () => {
   const unavailable = {...recipe,ingredient_groups:[{id:'g1',name:'Ingredients',ingredients:[
@@ -84,7 +84,7 @@ it('flags unscalable ingredients and explains unavailable gram conversions', asy
 });
 
 
-it('shows estimated gram ranges, their explanation, and the completed recalculation control', async () => {
+it('shows a recommended gram estimate with uncertainty and details in its tooltip', async () => {
   const ranged = {...recipe, ingredient_groups:[{...recipe.ingredient_groups[0], ingredients:[{
     ...recipe.ingredient_groups[0].ingredients[0],
     grams:{amount:null,low:110,high:130,estimated:true,basis:'Typical flour density',assumptions:['Level cup']},
@@ -93,10 +93,13 @@ it('shows estimated gram ranges, their explanation, and the completed recalculat
   expect(screen.getByRole('button',{name:'Recalculate weight estimates'})).toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Adjust ingredient scale'}));
   await fireEvent.click(screen.getByRole('button',{name:'Grams'}));
-  const grams = screen.getByRole('button',{name:'110–130 g'});
+  const grams = screen.getByRole('button',{name:'120 g'});
   await fireEvent.focusIn(grams);
-  expect(await screen.findByRole('tooltip')).toHaveTextContent('Basis: Typical flour density');
-  expect(screen.getByRole('tooltip')).toHaveTextContent('Assumptions: Level cup');
+  const tooltip = await screen.findByRole('tooltip');
+  expect(tooltip).toHaveTextContent('Original: 1 cup flour Estimate: 120 ± 10 g');
+  expect(tooltip.textContent).toContain('Original: 1 cup flour\nEstimate: 120 ± 10 g');
+  expect(tooltip).toHaveTextContent('Basis: Typical flour density');
+  expect(tooltip).toHaveTextContent('Assumptions: Level cup');
 });
 
 it('renders photos directly at the bottom instead of behind a photos toggle', async () => {

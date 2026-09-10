@@ -309,6 +309,7 @@ async def test_ai_job_batches_deduplicates_and_reuses_global_conversion_cache(re
     assert [(row["grams"]["low"], row["grams"]["high"]) for row in saved] == [
         (50, 60), (200, 240), (135, 165), (1, 1.5), (30, 34),
     ]
+    assert [row["grams"]["amount"] for row in saved] == [55, 220, 150]
     assert len(calls) == 1
     assert len(repo.rows["gram_conversions"]) == 4
     assert (await repo.get("jobs", job["id"]))["state"] == "succeeded"
@@ -322,6 +323,7 @@ async def test_ai_job_batches_deduplicates_and_reuses_global_conversion_cache(re
     reused = await jobs.enrich_recipe(second_recipe, Settings(), repo=repo)
     grams = reused[0]["ingredients"][0]["grams"]
     assert (grams["low"], grams["high"]) == (150, 180)
+    assert grams["amount"] == 165
     assert repo.rows["usage"] == before_usage
 
 

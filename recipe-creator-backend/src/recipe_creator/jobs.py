@@ -175,6 +175,7 @@ async def enrich_recipe(recipe: dict, settings: Settings, *, repo=None) -> list[
             high = basis["quantity_high"] * conversion["grams_per_unit_high"]
             item.update(
                 grams={
+                    "amount": (low + high) / 2,
                     "low": low,
                     "high": high,
                     "source": "ai_estimate",

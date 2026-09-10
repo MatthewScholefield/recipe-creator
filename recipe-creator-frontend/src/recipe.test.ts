@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { components } from './api.generated';
 import type { GramEstimate, Recipe, RecipeDraft } from './types';
-import { blank, ingredient, quantity, scaled, ingredientText, formatRecipe, applyParse, ParseGuard, move, ingredientLine, changedIngredient, dirtyIngredientLines, applyIngredientLines, withoutEmptyIngredients, normalizeTags, tagError, classifierMessage } from './recipe';
+import { blank, ingredient, quantity, scaled, gramEstimateText, gramText, ingredientText, formatRecipe, applyParse, ParseGuard, move, ingredientLine, changedIngredient, dirtyIngredientLines, applyIngredientLines, withoutEmptyIngredients, normalizeTags, tagError, classifierMessage } from './recipe';
 import { load, save, safeUrl, translateLegacy } from './local';
 describe('generated API contract', () => {
   it('links recipe fields and retains extensible server gram estimates in editor state', () => {
@@ -38,7 +38,7 @@ describe('lossless recipe representations', () => {
 describe('safe ingredient quantities', () => {
   it.each([['½',0.5],['1½',1.5],['2 1/4',2.25],['0.25',0.25],['1/0',null],['to taste',null],['-2',null],['1–2',null]])('parses %s without guessing', (text, expected) => {expect(quantity(text as string)).toBe(expected);});
   it('scales fractions and ranges only in ingredients', () => {const row = {...ingredient(), quantity:'1/2', quantity_max:'1', unit:'cup', name:'flour'}; expect(ingredientText(row,2)).toBe('1–2 cup flour'); expect(scaled('to taste',2)).toBe('to taste');});
-  it('labels estimates, retains unknown weights, and preserves originals', () => {const row = {...ingredient(), original_text:'one cup flour', quantity:'1', unit:'cup', name:'flour', grams:{amount:120, estimated:true, basis:'Estimated from a cup of flour'}}; expect(ingredientText(row,2,true)).toBe('≈ 240 g flour'); expect(ingredientText({...row,grams:{amount:null,low:110,high:130,estimated:true,basis:'Range'}},2,true)).toBe('≈ 220–260 g flour'); expect(row.original_text).toBe('one cup flour'); expect(ingredientText({...row, grams:null},2,true)).toBe('2 cup flour');});
+  it('shows one recommended estimate and keeps its uncertainty available', () => {const row = {...ingredient(), original_text:'one cup flour', quantity:'1', unit:'cup', name:'flour', grams:{amount:120, estimated:true, basis:'Estimated from a cup of flour'}}; expect(ingredientText(row,2,true)).toBe('≈ 240 g flour'); const ranged = {...row,grams:{amount:null,low:110,high:130,estimated:true,basis:'Range'}}; expect(gramText(ranged,2)).toBe('240 g'); expect(gramEstimateText(ranged,2)).toBe('240 ± 20 g'); expect(ingredientText(ranged,2,true)).toBe('≈ 240 g flour'); expect(row.original_text).toBe('one cup flour'); expect(ingredientText({...row, grams:null},2,true)).toBe('2 cup flour');});
 });
 describe('ingredient line editing', () => {
   const old = {...ingredient(), id:'legacy-row', original_text:'  ½ cup flour ', name:'flour', quantity:'0.5', unit:'cup', grams:{amount:60, estimated:true, basis:'old'}};
