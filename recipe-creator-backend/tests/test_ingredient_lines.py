@@ -1,9 +1,7 @@
-import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
-
 from recipe_creator import ai
 from recipe_creator.ingredient_lines import parse_ingredient_lines
 from recipe_creator.ingredients import parse_ingredient_line
@@ -27,14 +25,48 @@ from recipe_creator.settings import Settings
     ('salt to taste', None, None, '', 'salt', 'to taste', False),
 ])
 def test_deterministic_grammar(text, quantity, maximum, unit, name, preparation, optional):
-    assert parse_ingredient_line(text) == dict(quantity=quantity, quantity_max=maximum, unit=unit,
-                                              name=name, preparation=preparation, optional=optional, grams=None)
+    assert parse_ingredient_line(text) == {
+        'quantity': quantity, 'quantity_max': maximum, 'unit': unit, 'name': name,
+        'preparation': preparation, 'optional': optional, 'grams': None,
+    }
 
 
 @pytest.mark.parametrize('text', ['2 cans tomatoes', '1 (400g) can beans', '1/0 cup milk', '-2 eggs',
                                  '2–1 eggs', '1 + 2 eggs', '2x eggs', 'NaN 2 cups', '', '1/2/3 cups flour'])
 def test_uncertain_grammar(text):
     assert parse_ingredient_line(text) is None
+
+
+async def test_reported_parenthetical_equivalents_are_organized_without_ai(monkeypatch):
+    fallback = AsyncMock(side_effect=AssertionError('no fallback'))
+    reserve = AsyncMock()
+    monkeypatch.setattr(ai, 'parse_ingredient_lines_batch', fallback)
+    texts = [
+        '2 ¾ cups (385 g) all purpose gluten free flour blend',
+        '⅗ cup (72 g) tapioca starch/flour',
+        '1 tablespoon (9 g) instant yeast',
+        '1 (6 g) teaspoon kosher salt',
+        '1 (25 g) egg white',
+        '6 tablespoons (84 g) unsalted butter',
+        '1 ⅜ cups (11 ounces) warm water',
+    ]
+    result = await parse_ingredient_lines(
+        [{'id': str(index), 'text': text} for index, text in enumerate(texts)],
+        Settings(),
+        reserve_fallback=reserve,
+    )
+    assert [(item.ingredient.quantity, item.ingredient.unit, item.ingredient.name) for item in result.items] == [
+        ('2.75', 'cup', 'all purpose gluten free flour blend'),
+        ('0.6', 'cup', 'tapioca starch/flour'),
+        ('1', 'tbsp', 'instant yeast'),
+        ('1', 'tsp', 'kosher salt'),
+        ('1', '', 'egg white'),
+        ('6', 'tbsp', 'unsalted butter'),
+        ('1.375', 'cup', 'warm water'),
+    ]
+    assert all(item.method == 'deterministic' for item in result.items)
+    fallback.assert_not_called()
+    reserve.assert_not_called()
 
 
 async def test_no_ai_for_deterministic(monkeypatch):

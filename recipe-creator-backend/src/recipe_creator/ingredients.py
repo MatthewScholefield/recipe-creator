@@ -1,12 +1,12 @@
 """Deterministic ingredient display and conservative, provenance-bound mass conversion."""
 from __future__ import annotations
 
-from copy import deepcopy
-from fractions import Fraction
-from hashlib import sha256
 import json
 import math
 import re
+from copy import deepcopy
+from fractions import Fraction
+from hashlib import sha256
 
 _VULGAR = {"¼": "1/4", "½": "1/2", "¾": "3/4", "⅐": "1/7", "⅑": "1/9",
            "⅒": "1/10", "⅓": "1/3", "⅔": "2/3", "⅕": "1/5", "⅖": "2/5",
@@ -21,13 +21,13 @@ _DERIVED = ("grams", "grams_range", "grams_estimate", "grams_provenance", "grams
 REGIONAL_ASSUMPTION = "US customary: cup=236.5882365 ml, tbsp=14.7867648 ml, tsp=4.9289216 ml"
 _AMBIGUOUS = re.compile(
     r"\b(?:to taste|as needed|as required|optional|or|and/or|package\w*|packets?|packs?|"
-    r"cans?|tins?|jars?|bottles?|boxes?|bags?|sachets?|handfuls?|pinch\w*|dash\w*)\b", re.I,
+    r"cans?|tins?|jars?|bottles?|boxes?|bags?|sachets?|handfuls?|pinch\w*|dash\w*)\b", re.IGNORECASE,
 )
 _VOLUME = r"(?:cups?|tablespoons?|tbsp|teaspoons?|tsp|ml|millilit(?:er|re)s?|l|lit(?:er|re)s?|fl\.?\s*oz)"
 _COUNTS = r"(?:cloves?|eggs?|onions?|apples?|bananas?|lemons?|limes?|potatoes|tomatoes|carrots?)"
 
 
-def parse_quantity(value: str | float | int | None) -> tuple[float, float] | None:
+def parse_quantity(value: str | float | None) -> tuple[float, float] | None:
     """Return an inclusive range; reject ambiguous, negative and nonfinite amounts."""
     if value is None or isinstance(value, bool):
         return None
@@ -64,7 +64,9 @@ for _canonical, _aliases in {
 UNIT_ALIASES.update({'fl oz': 'fl oz', 'fl. oz': 'fl oz', 'fluid ounce': 'fl oz', 'fluid ounces': 'fl oz'})
 _NUMBER = r'(?:\d+\s+\d+\s*[/⁄]\s*\d+|\d+\s*[/⁄]\s*\d+|\d*\s*[' + ''.join(_VULGAR) + r']|\d+(?:\.\d+)?|\.\d+)'
 _LINE_AMOUNT = re.compile(r'^(' + _NUMBER + r')(?:\s*(?:[–—-]|\bto\b)\s*(' + _NUMBER + r'))?')
-_UNCERTAIN_LINE = re.compile(r'\b(?:packages?|packets?|packs?|cans?|tins?|jars?|bottles?|boxes?|bags?|sachets?|handfuls?|pinches?|dashes?|or|and/or)\b|[×*=<>]', re.I)
+_UNIT_PATTERN = '|'.join(re.escape(alias) for alias in sorted(UNIT_ALIASES, key=len, reverse=True))
+_PARENTHETICAL_MEASURE = re.compile(rf'^\(\s*({_NUMBER})\s*({_UNIT_PATTERN})\s*\)\s*', re.IGNORECASE)
+_UNCERTAIN_LINE = re.compile(r'\b(?:packages?|packets?|packs?|cans?|tins?|jars?|bottles?|boxes?|bags?|sachets?|handfuls?|pinches?|dashes?|or|and/or)\b|[×*=<>]', re.IGNORECASE)
 
 
 def numeric_string(value):
@@ -74,13 +76,11 @@ def numeric_string(value):
 def parse_ingredient_line(text: str) -> dict | None:
     """Conservative source-only grammar; uncertainty never fabricates amounts."""
     source = text.strip()
-    if not source or _UNCERTAIN_LINE.search(source) or re.search(r'\b(?:nan|inf|infinity)\b|[∞]', source, re.I):
+    if not source or _UNCERTAIN_LINE.search(source) or re.search(r'\b(?:nan|inf|infinity)\b|[∞]', source, re.IGNORECASE):
         return None
     optional = source.endswith('(optional)')
     if optional:
         source = source[:-10].rstrip()
-    if '(' in source or ')' in source:
-        return None
     quantity = quantity_max = None
     unit = ''
     match = _LINE_AMOUNT.match(source)
@@ -99,12 +99,27 @@ def parse_ingredient_line(text: str) -> dict | None:
                 unit = UNIT_ALIASES[alias]
                 remaining = remaining[len(alias):].lstrip()
                 break
-        if attached and not unit:
+        if attached and not unit and not remaining.startswith('('):
             return None
+        equivalent = _PARENTHETICAL_MEASURE.match(remaining)
+        if equivalent:
+            alternate = parse_quantity(equivalent.group(1))
+            if not alternate or alternate[1] > 1_000_000_000:
+                return None
+            remaining = remaining[equivalent.end():]
+            if not unit:
+                for alias in sorted(UNIT_ALIASES, key=len, reverse=True):
+                    if (remaining.casefold().startswith(alias)
+                            and len(remaining) > len(alias)
+                            and remaining[len(alias)].isspace()):
+                        unit = UNIT_ALIASES[alias]
+                        remaining = remaining[len(alias):].lstrip()
+                        break
         source = remaining
     elif not source[0].isalpha():
         return None
-    if not source or any(ch.isdigit() for ch in source) or re.search(r'[/⁄+–—]|(?<!\w)-(?!\w)', source):
+    if (not source or any(ch.isdigit() for ch in source) or '(' in source or ')' in source
+            or re.search(r'(?<![A-Za-z])[/⁄]|[/⁄](?![A-Za-z])|[+–—]|(?<!\w)-(?!\w)', source)):
         return None
     name, separator, preparation = source.partition(',')
     name, preparation = name.strip(), preparation.strip()
@@ -161,11 +176,11 @@ def estimation_eligible(ingredient: dict) -> bool:
     text = format_ingredient(ingredient)
     if _AMBIGUOUS.search(text) or re.search(r"[()]|(?<=[A-Za-z])\s*/\s*(?=[A-Za-z])", text):
         return False
-    match = re.match(rf"^\s*(.+?)\s+({_VOLUME}|{_COUNTS})\b(.*)$", text, re.I)
+    match = re.match(rf"^\s*(.+?)\s+({_VOLUME}|{_COUNTS})\b(.*)$", text, re.IGNORECASE)
     if not match or parse_quantity(match[1]) is None:
         return False
     # Volume without an ingredient identity has no density basis.
-    return bool(match[3].strip()) or bool(re.fullmatch(_COUNTS, match[2], re.I))
+    return bool(match[3].strip()) or bool(re.fullmatch(_COUNTS, match[2], re.IGNORECASE))
 
 
 def invalidate_estimates(ingredient: dict) -> dict:
