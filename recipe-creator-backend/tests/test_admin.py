@@ -225,20 +225,22 @@ async def test_owner_revision_one_race_eligibility_restore_and_rollback(identity
 
 
 @pytest.mark.integration
-async def test_merge_rejects_either_admin_profile(identity_app):
+@pytest.mark.parametrize("admin_side", ["source", "target", "both"])
+async def test_merge_allows_admin_profiles_and_preserves_target_permission(identity_app, admin_side):
     repo = identity_app.state.repo
     async with client(identity_app) as browser:
         await login(browser)
-        source = await repo.create('users', {'display_name': 'source'})
-        target = await repo.create('users', {'display_name': 'target'})
-        body = {'source_id': source['id'], 'target_id': target['id']}
-        for privileged in (source, target):
-            await repo.update('users', privileged['id'], {'is_admin': True})
-            preview = await browser.post('/admin/merge/preview', json=body)
-            assert preview.status_code == 409 and 'Revoke admin permission' in preview.text
-            assert (await browser.post('/admin/merge', json={**body, 'confirm': True})).status_code == 409
-            await repo.update('users', privileged['id'], {'is_admin': False})
-        assert (await browser.post('/admin/merge/preview', json=body)).status_code == 200
+        source = await repo.create("users", {"display_name": "source", "is_admin": admin_side in {"source", "both"}})
+        target = await repo.create("users", {"display_name": "target", "is_admin": admin_side in {"target", "both"}})
+        body = {"source_id": source["id"], "target_id": target["id"]}
+        directory = (await browser.get("/admin/users?eligible_merge=true")).json()
+        assert {source["id"], target["id"]} <= {user["id"] for user in directory["items"]}
+        preview = await browser.post("/admin/merge/preview", json=body)
+        assert preview.status_code == 200, preview.text
+        merged = await browser.post("/admin/merge", json={**body, "confirm": True})
+        assert merged.status_code == 200, merged.text
+        assert not (await repo.get("users", source["id"]))["is_admin"]
+        assert (await repo.get("users", target["id"]))["is_admin"] is (admin_side in {"target", "both"})
 
 
 @pytest.mark.integration

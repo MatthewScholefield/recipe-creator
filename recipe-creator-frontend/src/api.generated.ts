@@ -1796,6 +1796,7 @@ export interface operations {
                 start?: number;
                 limit?: number;
                 eligible_owner?: boolean;
+                eligible_merge?: boolean;
             };
             header?: never;
             path?: never;

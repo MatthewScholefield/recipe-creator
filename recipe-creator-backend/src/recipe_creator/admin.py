@@ -56,11 +56,13 @@ async def audit(tx, context, action, target, **data):
 
 
 @router.get("/users", response_model=AdminUsersResponse)
-async def users(request: Request, q: str = Query(default="", max_length=100), start: int = Query(default=0, ge=0), limit: int = Query(default=20, ge=1, le=500), eligible_owner: bool = False):
+async def users(request: Request, q: str = Query(default="", max_length=100), start: int = Query(default=0, ge=0), limit: int = Query(default=20, ge=1, le=500), eligible_owner: bool = False, eligible_merge: bool = False):
     await require_admin(request)
     rows = await all_rows(request.app.state.repo, "users")
     if eligible_owner:
         rows = [row for row in rows if row["state"] == "active" and not row.get("merged_into")]
+    elif eligible_merge:
+        rows = [row for row in rows if row["state"] != "merged" and not row.get("merged_into")]
     rows.sort(key=lambda row: (row["display_name"].casefold(), row["id"]))
     rows = [row for row in rows if q.casefold() in row["display_name"].casefold() or q.casefold() in row["id"].casefold()]
     devices = await all_rows(request.app.state.repo, "devices")
@@ -171,8 +173,6 @@ async def merge_users(tx, source_id, target_id):
     target = await tx.get("users", target_id)
     if not source or not target:
         raise HTTPException(404, "User not found")
-    if source.get("is_admin") or target.get("is_admin"):
-        raise HTTPException(409, "Revoke admin permission before merging these profiles.")
     if source_id == target_id:
         raise HTTPException(422, "Choose two distinct profiles")
     if target.get("merged_into"):
@@ -248,7 +248,7 @@ async def merge(body: MergeInput, request: Request):
                 await tx.update(table, row["id"], {field: target_id})
         await invalidate_pairings(tx, user_ids=(source_id, target_id))
         await merge_usage(tx, source_id, target_id)
-        await tx.update("users", source_id, {"merged_into": target_id, "state": "merged", "photo_trust": False})
+        await tx.update("users", source_id, {"merged_into": target_id, "state": "merged", "photo_trust": False, "is_admin": False})
         await audit(tx, context, "user.merge", target_id, source_id=source_id, target_id=target_id, restrictions=restrictions)
         return {"user": public_user(target), "already_merged": False}
 

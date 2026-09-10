@@ -52,10 +52,20 @@ it('keeps text publishable during a parser outage', async () => {
   const write = fetcher.mock.calls.find(([url]) => url === '/api/recipes');
   expect(JSON.parse(write![1]!.body as string)).toMatchObject({mode:'text',source_text:'Original recipe'});
 });
-it('discards a merge preview if profile IDs change before it arrives', async () => {
-  let resolvePreview!: (value: unknown) => void;
-  mockApi(url => url === '/api/session' ? {...identity,admin:true} : url.startsWith('/api/admin/merge/preview?') ? new Promise(resolve => resolvePreview = resolve) : {photos:[]});
-  render(Admin); await fireEvent.click(await screen.findByRole('button',{name:'merge'})); const source = screen.getByLabelText('Source profile ID (will merge into target)'); const target = screen.getByLabelText('Target profile ID (survives)'); await fireEvent.input(source,{target:{value:'source'}}); await fireEvent.input(target,{target:{value:'target'}}); await fireEvent.click(screen.getByRole('button',{name:'Preview merge'})); await waitFor(() => expect(resolvePreview).toBeTypeOf('function')); await fireEvent.input(target,{target:{value:'different'}}); resolvePreview({counts:{recipes:3}}); await waitFor(() => expect(screen.getByRole('button',{name:'Preview merge'})).toBeEnabled()); expect(screen.queryByRole('button',{name:'Confirm profile merge'})).not.toBeInTheDocument();
+it('selects searchable merge profiles and invalidates an old preview', async () => {
+  const candidates = ['Source','Target','Other'].map(display_name => ({...identity.user,id:display_name.toLowerCase(),display_name,last_login_at:null}));
+  const fetcher = mockApi(url => url === '/api/session' ? {...identity,admin:true} : url.startsWith('/api/admin/users?') ? {items:candidates,has_more:false} : url.startsWith('/api/admin/merge/preview?') ? {counts:{recipes:3}} : {photos:[]});
+  render(Admin); await fireEvent.click(await screen.findByRole('button',{name:'merge'}));
+  const source = screen.getByRole('combobox',{name:'Source profile (will merge into target)'});
+  const target = screen.getByRole('combobox',{name:'Target profile (survives)'});
+  await fireEvent.focus(source); await fireEvent.click(await screen.findByRole('option',{name:/^Source /}));
+  await fireEvent.focus(target); await fireEvent.click(await screen.findByRole('option',{name:/^Target /}));
+  await fireEvent.click(screen.getByRole('button',{name:'Preview merge'}));
+  expect(await screen.findByRole('button',{name:'Confirm profile merge'})).toBeInTheDocument();
+  expect(fetcher.mock.calls.some(([url]) => url === '/api/admin/merge/preview?source_id=source&target_id=target')).toBe(true);
+  expect(fetcher.mock.calls.some(([url]) => String(url).includes('eligible_merge=true'))).toBe(true);
+  await fireEvent.focus(source); await fireEvent.click(await screen.findByRole('option',{name:/^Other /}));
+  expect(screen.queryByRole('button',{name:'Confirm profile merge'})).not.toBeInTheDocument();
 });
 it('browses summaries without a reactive request loop or identity creation', async () => {
   const fetcher = mockApi(url => url.includes('/tags') ? {tags:['dinner']} : {items:[{id:'r1',title:'Soup',description:'Warm',tags:['dinner'],author_name:null}],has_more:false,errors:[]});

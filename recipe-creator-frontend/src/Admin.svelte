@@ -6,7 +6,8 @@
   import Spinner from './ui/Spinner.svelte';
   import Button from './ui/Button.svelte';
   import Icon from './ui/Icon.svelte';
-  import type { AdminPhoto, User, SiteCopy, SiteSettings } from './types';
+  import UserPicker from './UserPicker.svelte';
+  import type { AdminPhoto, AdminUser, User, SiteCopy, SiteSettings } from './types';
   const identity = $derived(appState.identity);
   let busy = $state(false), error = $state(''), notice = $state(''), tab = $state('photos');
   let photos = $state<AdminPhoto[]>([]), users = $state<User[]>([]), query = $state('');
@@ -27,7 +28,7 @@
       }
     });
   }
-  let sourceId = $state(''), targetId = $state(''), preview = $state<Record<string, unknown>>(), previewKey = $state(''), mergeConfirmed = $state(false), audit = $state<Record<string, unknown>[]>([]);
+  let source = $state<AdminUser | null>(null), target = $state<AdminUser | null>(null), preview = $state<Record<string, unknown>>(), previewKey = $state(''), mergeConfirmed = $state(false), audit = $state<Record<string, unknown>[]>([]);
   onMount(() => {void action(async () => {await refreshIdentity(); if (appState.identity?.admin) await loadTab('photos');});});
   async function action(fn: () => Promise<void>) {busy = true; error = ''; notice = ''; try {await fn();} catch(e) {error = message(e);} finally {busy = false;} }
   async function loadTab(value: string) {tab = value; if (value === 'photos') photos = (await request<{photos: AdminPhoto[]}>('/admin/photos')).photos; else if (value === 'users') users = (await request<{users: User[]}>(`/admin/users?q=${encodeURIComponent(query)}`)).users; else if (value === 'copy' && !copyLoaded) await loadCopy(); else if (value === 'audit') audit = (await request<{events: Record<string, unknown>[]}>('/admin/audit')).events;}
@@ -79,19 +80,23 @@
 <section class="notice" aria-label="Site text preview"><h3>Preview</h3><strong>{copy.site_title}</strong>{#if copy.site_tagline}<p>{copy.site_tagline}</p>{/if}<h4>{copy.home_title}</h4>{#if copy.home_intro}<p>{copy.home_intro}</p>{/if}{#if copy.footer_text}<p>{copy.footer_text}</p>{/if}</section>{/if}
 <button type="button" disabled={busy} onclick={() => void action(loadCopy)}>Reload saved text (discard edits)</button>
 {:else if tab === 'merge'}<h2>Merge profiles</h2>
-<p>Verify ownership with the people involved outside this website first. The source will become the surviving target profile. Review blocked/trusted state conflicts; no admin privilege is transferred.</p>
-<form onsubmit={(event) => {event.preventDefault(); void action(async () => {const source = sourceId, target = targetId; preview = undefined; mergeConfirmed = false; const result = await request<Record<string, unknown>>(`/admin/merge/preview?source_id=${id(source)}&target_id=${id(target)}`); if (source !== sourceId || target !== targetId) return; preview = result; previewKey = `${source}:${target}`;});}}>
-<label>Source profile ID (will merge into target)<input required bind:value={sourceId} oninput={() => {preview = undefined; mergeConfirmed = false;}}>
-</label>
-<label>Target profile ID (survives)<input required bind:value={targetId} oninput={() => {preview = undefined; mergeConfirmed = false;}}>
-</label>
-<button disabled={busy || !sourceId || !targetId || sourceId === targetId}>Preview merge</button>
+<p>Verify ownership with the people involved outside this website first. The source profile will be merged into the surviving target profile. Review blocked/trusted state conflicts; the target profile’s admin permission remains unchanged.</p>
+<form onsubmit={(event) => {event.preventDefault(); void action(async () => {const sourceId = source!.id, targetId = target!.id; preview = undefined; mergeConfirmed = false; const result = await request<Record<string, unknown>>(`/admin/merge/preview?source_id=${id(sourceId)}&target_id=${id(targetId)}`); if (sourceId !== source?.id || targetId !== target?.id) return; preview = result; previewKey = `${sourceId}:${targetId}`;});}}>
+<div class="merge-users">
+<UserPicker label="Source profile (will merge into target)" selectedId={source?.id} selectedName={source?.display_name} disabled={busy} eligibility="merge" excludeId={target?.id} help="Search by profile name or ID." optionsLabel="Source profiles" showIds onselect={(user) => {source = user; preview = undefined; mergeConfirmed = false;}} />
+<UserPicker label="Target profile (survives)" selectedId={target?.id} selectedName={target?.display_name} disabled={busy} eligibility="merge" excludeId={source?.id} help="Search by profile name or ID." optionsLabel="Target profiles" showIds onselect={(user) => {target = user; preview = undefined; mergeConfirmed = false;}} />
+</div>
+<button disabled={busy || !source || !target || source.id === target.id}>Preview merge</button>
 </form>{#if preview}<section class="notice">
 <h3>Merge preview</h3>
 <pre class="prose">{JSON.stringify(preview, null, 2)}</pre>
 <label class="inline">
 <input type="checkbox" bind:checked={mergeConfirmed}>I verified ownership and reviewed recipe, photo, device, and trust/block changes</label>
-<button class="danger" disabled={busy || !mergeConfirmed || previewKey !== `${sourceId}:${targetId}`} onclick={() => {if (confirm('Merge these profiles now? This cannot be undone with the profile editor.')) void action(async () => {await mutate('/admin/merge', {source_id: sourceId, target_id: targetId, confirm: true}); preview = undefined; sourceId = ''; targetId = ''; notice = 'Profiles merged. Review the audit log.';});}}>Confirm profile merge</button>
+<button class="danger" disabled={busy || !mergeConfirmed || previewKey !== `${source?.id}:${target?.id}`} onclick={() => {if (confirm('Merge these profiles now? This cannot be undone with the profile editor.')) void action(async () => {await mutate('/admin/merge', {source_id: source!.id, target_id: target!.id, confirm: true}); preview = undefined; source = null; target = null; notice = 'Profiles merged. Review the audit log.';});}}>Confirm profile merge</button>
 </section>{/if}
 {:else if tab === 'audit'}<h2>Audit events</h2>{#each audit as event}<pre class="audit">{JSON.stringify(event, null, 2)}</pre>{/each}{#if !busy && !audit.length}<p>No audit events returned.</p>{/if}{/if}
 {:else}<p role="status">Checking admin access…</p>{/if}
+
+<style>
+  .merge-users{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr));gap:1rem;margin-bottom:1rem}
+</style>
