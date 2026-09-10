@@ -21,4 +21,14 @@ After API schema changes, run `npm --prefix recipe-creator-frontend run generate
 
 ## Commit policy
 
-Every completed code, configuration, test, or documentation change MUST be committed before reporting the task complete, even when the user does not explicitly request a commit. Treat committing as the final required delivery step, not an optional cleanup step. Before the final response, verify that all files changed by this task are included in the commit and that no task-owned changes remain uncommitted. Never skip this step because validation passed or because the user did not mention version control. The only exception is an explicit user instruction not to commit.
+Committing is part of task completion, not optional cleanup. Unless the user explicitly says not to commit, every completed code, configuration, test, or documentation change MUST be committed before the final response.
+
+Use this exact delivery gate:
+
+1. After implementation and validation pass, inspect `git status --short` and identify every change owned by this task.
+2. Stage only those task-owned files; do not include unrelated user work.
+3. Create the commit immediately, before writing any completion message.
+4. Verify the commit contains every task-owned change and that no task-owned modifications remain uncommitted.
+5. If any task-owned change remains, stop and commit it before reporting completion.
+
+Never treat passing tests, a clean diff review, or the absence of an explicit commit request as a reason to skip this gate. The only exception is an explicit user instruction not to commit.
