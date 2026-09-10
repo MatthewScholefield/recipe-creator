@@ -659,6 +659,8 @@ export interface components {
              * @default
              */
             basis: string;
+            /** Refusal Reason */
+            refusal_reason?: string | null;
         } & {
             [key: string]: unknown;
         };

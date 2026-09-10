@@ -67,6 +67,12 @@
     }
     return details.join(' ');
   }
+  function gramUnavailableExplanation(row: Ingredient) {
+    const reason = typeof row.grams?.refusal_reason === 'string' ? row.grams.refusal_reason.trim() : '';
+    return reason
+      ? `No gram conversion: ${reason}`
+      : 'No gram conversion is available yet. This amount remains in the original units.';
+  }
   function scaledAmount(value: number | string) { return new Intl.NumberFormat('en', {maximumFractionDigits: 3}).format(Number(value) * factor); }
   function hasGramWeight(row: Ingredient) { return gramText(row) !== null; }
   function originalAmount(row: Ingredient) {
@@ -116,7 +122,7 @@
   {#if grams && weight}
     <span>{row.grams?.estimated === false ? '' : '≈ '}<Tooltip text={gramExplanation(row)}><button type="button" class="gram-amount">{weight}</button></Tooltip>{' '}{ingredientTail(row) || row.original_text}</span>
   {:else if grams}
-    <span><Tooltip text="No gram conversion is available. This amount remains in the original units."><button type="button" class="gram-amount unavailable">{originalAmount(row) || ingredientText(row,factor)}</button></Tooltip>{#if originalAmount(row)}{' '}{ingredientTail(row)}{/if}</span>
+    <span><Tooltip text={gramUnavailableExplanation(row)}><button type="button" class="gram-amount unavailable">{originalAmount(row) || ingredientText(row,factor)}</button></Tooltip>{#if originalAmount(row)}{' '}{ingredientTail(row)}{/if}</span>
   {:else}
     <span>{ingredientText(row,factor)}</span>
   {/if}

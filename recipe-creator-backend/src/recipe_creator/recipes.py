@@ -258,6 +258,13 @@ def _groups_output(groups, seed):
                 grams = grams or {"estimated": ingredient.get("grams_estimate", True), "basis": basis}
                 grams.setdefault("low", bounds[0])
                 grams.setdefault("high", bounds[1])
+            refusal = provenance.get("refusal_reason") if isinstance(provenance, dict) else None
+            if grams is None and ingredient.get("grams_error") == "estimation_refused" and refusal:
+                grams = {
+                    "estimated": True,
+                    "basis": basis,
+                    "refusal_reason": refusal,
+                }
             item["grams"] = grams
             rows.append(item)
         result.append({"id": gid, "name": group.get("name", group.get("title", "")), "ingredients": rows})

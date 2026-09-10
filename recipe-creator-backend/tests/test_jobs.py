@@ -262,6 +262,9 @@ async def test_ai_job_batches_deduplicates_and_reuses_global_conversion_cache(re
         {"text": "0.5 cups tapioca starch"},
         {"text": "2 cups tapioca starch"},
         {"text": "3 eggs"},
+        {"text": "1/4 tsp salt", "quantity": "1/4", "unit": "tsp", "name": "salt"},
+        {"text": "1 egg white, at room temperature", "quantity": "1", "unit": "",
+         "name": "egg white", "preparation": "at room temperature"},
     ]
     repo.rows["recipes"]["r"].update(
         ingredient_groups=[{"ingredients": ingredients}], owner_id="u",
@@ -278,11 +281,14 @@ async def test_ai_job_batches_deduplicates_and_reuses_global_conversion_cache(re
         ))
         calls.append(payload)
         assert [(item["unit"], item["ingredient_label"]) for item in payload["items"]] == [
-            ("cup", "tapioca starch"), ("egg", "egg"),
+            ("cup", "tapioca starch"), ("egg", "egg"), ("tsp", "salt"),
+            ("item", "egg white, at room temperature"),
         ]
         rows = []
         for item in payload["items"]:
-            low, high = ((100, 120) if item["unit"] == "cup" else (45, 55))
+            low, high = {
+                "cup": (100, 120), "egg": (45, 55), "tsp": (4, 6), "item": (30, 34),
+            }[item["unit"]]
             rows.append({
                 "cache_key": item["cache_key"],
                 "grams_per_unit_low": low,
@@ -301,10 +307,10 @@ async def test_ai_job_batches_deduplicates_and_reuses_global_conversion_cache(re
     assert completed["state"] == "succeeded", completed.get("last_error")
     saved = (await repo.get("recipes", "r"))["ingredient_groups"][0]["ingredients"]
     assert [(row["grams"]["low"], row["grams"]["high"]) for row in saved] == [
-        (50, 60), (200, 240), (135, 165),
+        (50, 60), (200, 240), (135, 165), (1, 1.5), (30, 34),
     ]
     assert len(calls) == 1
-    assert len(repo.rows["gram_conversions"]) == 2
+    assert len(repo.rows["gram_conversions"]) == 4
     assert (await repo.get("jobs", job["id"]))["state"] == "succeeded"
     assert all(row["count"] == 2 for row in repo.rows["usage"].values())
 
@@ -319,24 +325,27 @@ async def test_ai_job_batches_deduplicates_and_reuses_global_conversion_cache(re
     assert repo.rows["usage"] == before_usage
 
 
+
 async def test_refusal_is_persisted_without_fabricated_grams(repo):
     from pydantic_ai.models.test import TestModel
+    from recipe_creator import recipes
     from recipe_creator.ai import estimator_agent
     from recipe_creator.ingredients import REGIONAL_ASSUMPTION, gram_estimation_basis
 
-    item = {"text": "1 cup mystery flour"}
+    item = {"text": "1 whisk", "quantity": "1", "name": "whisk"}
     repo.rows["recipes"]["r"]["ingredient_groups"] = [{"ingredients": [item]}]
     job = await enqueue(repo)
     key = jobs.gram_conversion_key(gram_estimation_basis(item))
+    reason = "A whisk is a kitchen tool, not a food ingredient."
     refusal = {
         "regional_assumption": REGIONAL_ASSUMPTION,
         "items": [{
             "cache_key": key,
             "grams_per_unit_low": None,
             "grams_per_unit_high": None,
-            "basis": "Density unknown",
-            "assumptions": ["No density assumed"],
-            "refusal_reason": "Unknown ingredient",
+            "basis": "Non-food recipe equipment",
+            "assumptions": ["The label refers to a kitchen tool"],
+            "refusal_reason": reason,
         }],
     }
     with estimator_agent.override(model=TestModel(custom_output_args=refusal)):
@@ -344,7 +353,9 @@ async def test_refusal_is_persisted_without_fabricated_grams(repo):
     saved = (await repo.get("recipes", "r"))["ingredient_groups"][0]["ingredients"][0]
     assert saved.get("grams") is None
     assert saved["grams_error"] == "estimation_refused"
-    assert saved["grams_provenance"]["refusal_reason"] == "Unknown ingredient"
+    assert saved["grams_provenance"]["refusal_reason"] == reason
+    output = recipes._groups_output([{"ingredients": [saved]}], "r")
+    assert output[0]["ingredients"][0]["grams"]["refusal_reason"] == reason
     assert (await repo.get("jobs", job["id"]))["state"] == "succeeded"
 
 

@@ -66,7 +66,8 @@ it('opens scaling controls and anchors original amounts to gram amounts only', a
 it('flags unscalable ingredients and explains unavailable gram conversions', async () => {
   const unavailable = {...recipe,ingredient_groups:[{id:'g1',name:'Ingredients',ingredients:[
     {...ingredient(),id:'i1',original_text:'⅗ cup tapioca starch/flour, plus more for sprinkling'},
-    {...ingredient(),id:'i2',quantity:'1',unit:'cup',name:'flour',original_text:'1 cup flour'},
+    {...ingredient(),id:'i2',quantity:'1',unit:'cup',name:'flour',original_text:'1 cup flour',
+      grams:{amount:null,low:null,high:null,estimated:true,basis:'Insufficient identity',refusal_reason:'The ingredient type is not specific enough to choose a density.'}},
   ]}]};
   mockApi(unavailable); const view = render(Detail,{recipeId:'r1',navigate:vi.fn()});
   await screen.findByRole('heading',{name:'Soup'});
@@ -78,7 +79,7 @@ it('flags unscalable ingredients and explains unavailable gram conversions', asy
   const amount = screen.getByRole('button',{name:'2 cup'});
   expect(amount).toHaveClass('unavailable');
   await fireEvent.mouseEnter(amount.closest('.tooltip-wrap')!);
-  expect(await screen.findByRole('tooltip')).toHaveTextContent('No gram conversion is available');
+  expect(await screen.findByRole('tooltip')).toHaveTextContent('No gram conversion: The ingredient type is not specific enough to choose a density.');
   expect(screen.getByText('flour')).toBeInTheDocument();
 });
 

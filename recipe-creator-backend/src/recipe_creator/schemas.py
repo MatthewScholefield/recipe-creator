@@ -147,6 +147,7 @@ class GramEstimate(BaseModel):
     high: float | None = None
     estimated: bool = True
     basis: str = ""
+    refusal_reason: str | None = None
 
 
 class IngredientOutput(BaseModel):

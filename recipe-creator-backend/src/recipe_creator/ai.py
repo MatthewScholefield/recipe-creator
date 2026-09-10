@@ -180,7 +180,7 @@ class GramBasisOutput(StrictSchema):
     grams_per_unit_high: float | None = Field(ge=0, allow_inf_nan=False)
     basis: str = Field(min_length=1, max_length=1000)
     assumptions: list[str] = Field(min_length=1, max_length=8)
-    refusal_reason: str | None = Field(default=None, max_length=500)
+    refusal_reason: str | None = Field(default=None, min_length=10, max_length=500)
 
 
 class GramEstimateBatchOutput(StrictSchema):
@@ -225,11 +225,14 @@ estimator_agent = Agent(
         "regional_assumption exactly. Process each distinct item with the same short sequence: "
         "(1) identify the specific ingredient form named by the label; (2) choose an "
         "ingredient-specific density for a volume unit or a typical single-item mass for a count "
-        "unit; (3) report a conservative low/high gram range for exactly one canonical unit. "
+        "unit; (3) report a conservative low/high gram range for exactly one supplied unit. "
         "Do not estimate or multiply recipe quantities; the application does that deterministically. "
         "State the concrete basis and only material assumptions such as packing, preparation, or "
-        "item size. Never use a generic volume-to-mass conversion. Refuse unknown ingredients or "
-        "insufficiently specified forms by setting both bounds null and explaining refusal_reason."
+        "item size. Make a reasonable estimate whenever the item is food and its supplied unit "
+        "describes a bounded amount, including teaspoons, small quantities, eggs, egg parts, and "
+        "informal package or count units. Refusal is exceptional: use it only when the label is not "
+        "a food ingredient or the amount is genuinely absent or unbounded. A refusal_reason must "
+        "briefly identify the exact missing fact or non-food item; never give a generic inability."
     ),
     capabilities=[Thinking(effort="low")],
 )

@@ -20,10 +20,6 @@ _MASS = {"g": 1, "gram": 1, "grams": 1, "kg": 1000, "kilogram": 1000,
 _DERIVED = ("grams", "grams_range", "grams_estimate", "grams_provenance", "grams_input_hash",
             "grams_error", "grams_confirmed")
 REGIONAL_ASSUMPTION = "US customary: cup=236.5882365 ml, tbsp=14.7867648 ml, tsp=4.9289216 ml"
-_AMBIGUOUS = re.compile(
-    r"\b(?:to taste|as needed|as required|optional|or|and/or|package\w*|packets?|packs?|"
-    r"cans?|tins?|jars?|bottles?|boxes?|bags?|sachets?|handfuls?|pinch\w*|dash\w*)\b", re.IGNORECASE,
-)
 _UNIT_ALIASES = {
     "cup": "cup", "cups": "cup",
     "tablespoon": "tbsp", "tablespoons": "tbsp", "tbsp": "tbsp",
@@ -91,10 +87,18 @@ def format_ingredient(ingredient: dict) -> str:
 
 def ingredient_hash(ingredient: dict) -> str:
     # Match persistence defaults so a DB round trip cannot change the input digest.
-    authored = {"text": ingredient.get("text") or "", "name": ingredient.get("name") or "",
-                "quantity": ingredient.get("quantity"), "unit": ingredient.get("unit")}
-    if isinstance(authored["quantity"], (int, float)) and not isinstance(authored["quantity"], bool):
-        authored["quantity"] = float(authored["quantity"])
+    authored = {
+        "text": ingredient.get("text") or "",
+        "name": ingredient.get("name") or "",
+        "quantity": ingredient.get("quantity"),
+        "quantity_max": ingredient.get("quantity_max"),
+        "unit": ingredient.get("unit") or "",
+        "preparation": ingredient.get("preparation") or "",
+        "optional": ingredient.get("optional") is True,
+    }
+    for key in ("quantity", "quantity_max"):
+        if isinstance(authored[key], (int, float)) and not isinstance(authored[key], bool):
+            authored[key] = float(authored[key])
     return sha256(json.dumps(authored, ensure_ascii=False, sort_keys=True,
                              separators=(",", ":")).encode()).hexdigest()
 
@@ -108,39 +112,66 @@ def author_confirmed(ingredient: dict) -> bool:
             or isinstance(grams, dict) and grams.get("source") == "author_confirmed")
 
 
-def gram_estimation_basis(ingredient: dict) -> dict | None:
-    """Return a quantity-independent conversion key and the authored quantity range."""
-    text = format_ingredient(ingredient)
-    if _AMBIGUOUS.search(text) or re.search(r"[()]|(?<=[A-Za-z])\s*/\s*(?=[A-Za-z])", text):
-        return None
-    match = re.match(rf"^\s*(.+?)\s+({_ESTIMATION_UNITS})\b(.*)$", text, re.IGNORECASE)
-    amount = parse_quantity(match[1]) if match else None
-    if match is None or amount is None:
-        return None
-    raw_unit = re.sub(r"\s+", " ", match[2].strip().casefold()).rstrip(".")
-    unit = _UNIT_ALIASES.get(raw_unit)
-    if unit is None:
-        return None
-    tail = match[3].strip()
-    label = tail if unit in _VOLUME_UNITS else f"{unit}{(' ' + tail) if tail else ''}"
+def _leading_quantity(text: str) -> tuple[tuple[float, float], str] | None:
+    """Split the longest valid numeric quantity prefix from otherwise unknown units."""
+    for boundary in reversed([match.start() for match in re.finditer(r"\s+\S", text)]):
+        amount = parse_quantity(text[:boundary])
+        if amount is not None:
+            return amount, text[boundary:].strip()
+    return None
+
+
+def gram_estimation_basis(ingredient: dict) -> dict:
+    """Return a conversion key and multiplier for every unresolved ingredient."""
+    text = format_ingredient(ingredient).strip()
+    amount = parse_quantity(ingredient.get("quantity"))
+    maximum = parse_quantity(ingredient.get("quantity_max"))
+    if amount is not None:
+        low, high = amount
+        if maximum is not None and maximum[0] >= low:
+            high = maximum[-1]
+        raw_unit = " ".join(str(ingredient.get("unit") or "").casefold().split()).rstrip(".")
+        unit = _UNIT_ALIASES.get(raw_unit, raw_unit or "item")
+        label_parts = (ingredient.get("name"), ingredient.get("preparation"))
+        label = ", ".join(str(part).strip() for part in label_parts if str(part or "").strip())
+        if not label:
+            label = text
+    else:
+        match = re.match(rf"^\s*(.+?)\s+({_ESTIMATION_UNITS})\b(.*)$", text, re.IGNORECASE)
+        parsed = parse_quantity(match[1]) if match else None
+        if match is not None and parsed is not None:
+            low, high = parsed
+            raw_unit = re.sub(r"\s+", " ", match[2].strip().casefold()).rstrip(".")
+            unit = _UNIT_ALIASES[raw_unit]
+            tail = match[3].strip()
+            label = tail if unit in _VOLUME_UNITS else f"{unit}{(' ' + tail) if tail else ''}"
+        elif leading := _leading_quantity(text):
+            (low, high), label = leading
+            unit = "item"
+        else:
+            low = high = 1
+            unit = "unspecified amount"
+            label = text
     label = " ".join(normalize("NFKC", label).casefold().split()).strip(" ,")
-    if not label:
-        return None
     return {
         "unit": unit,
-        "ingredient_label": label,
-        "quantity_low": amount[0],
-        "quantity_high": amount[1],
+        "ingredient_label": label or "unspecified ingredient",
+        "quantity_low": low,
+        "quantity_high": high,
     }
 
 
 def estimation_eligible(ingredient: dict) -> bool:
-    """Only explicit, unambiguous ingredient-dependent volume/count amounts go to AI."""
-    if author_confirmed(ingredient) or ingredient.get("grams_input_hash") == ingredient_hash(ingredient) and (
-        ingredient.get("grams") is not None or ingredient.get("grams_range") is not None
-    ):
+    """Send every unresolved ingredient to AI; only a model refusal may omit grams."""
+    if author_confirmed(ingredient):
         return False
-    return gram_estimation_basis(ingredient) is not None
+    if ingredient.get("grams_input_hash") == ingredient_hash(ingredient):
+        return not (
+            ingredient.get("grams") is not None
+            or ingredient.get("grams_range") is not None
+            or ingredient.get("grams_error") == "estimation_refused"
+        )
+    return True
 
 
 def invalidate_estimates(ingredient: dict) -> dict:
@@ -174,10 +205,6 @@ def enrich_ingredient(ingredient: dict) -> dict:
         return result
     text = format_ingredient(result)
     embedded_grams = _parenthetical_mass(text) if result.get("text") else None
-    if embedded_grams is None and (
-        _AMBIGUOUS.search(text) or re.search(r"[()]|(?<=[A-Za-z])\s*/\s*(?=[A-Za-z])", text)
-    ):
-        return result
     if result.get("text"):
         grams = embedded_grams or _mass_from_text(result["text"])
     else:

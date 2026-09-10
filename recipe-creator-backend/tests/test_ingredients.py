@@ -107,12 +107,34 @@ def test_estimation_basis_normalizes_quantity_independent_cache_identity():
 @pytest.mark.parametrize("text", ["salt to taste", "1 package sugar", "1 can tomatoes",
     "1 cup flour or sugar", "1 cup", "100 g flour or 200 g sugar",
     "100 g flour/sugar", "100 g salt as needed", "2–1 cups flour", "a few eggs"])
-def test_ambiguous_inputs_never_get_estimates(text):
+def test_every_unresolved_input_reaches_estimation(text):
     from recipe_creator.ingredients import estimation_eligible
     item = enrich_ingredient({"text": text})
-    assert "grams" not in item
-    assert not estimation_eligible(item)
+    assert item.get("grams") is not None or estimation_eligible(item)
 
+
+def test_small_amounts_and_egg_parts_have_estimation_bases():
+    salt = gram_estimation_basis({
+        "text": "1/4 tsp salt", "quantity": "1/4", "unit": "tsp", "name": "salt",
+    })
+    white = gram_estimation_basis({
+        "text": "1 egg white, at room temperature", "quantity": "1",
+        "unit": "", "name": "egg white", "preparation": "at room temperature",
+    })
+    package = gram_estimation_basis({"text": "1 package sugar"})
+    assert salt == {
+        "unit": "tsp", "ingredient_label": "salt",
+        "quantity_low": .25, "quantity_high": .25,
+    }
+    assert white == {
+        "unit": "item", "ingredient_label": "egg white, at room temperature",
+        "quantity_low": 1, "quantity_high": 1,
+    }
+
+    assert package == {
+        "unit": "item", "ingredient_label": "package sugar",
+        "quantity_low": 1, "quantity_high": 1,
+    }
 
 @pytest.mark.parametrize("grams", [123, {"value": 123, "source": "author_confirmed"}])
 def test_author_confirmed_survives_enrichment_but_invalidates_on_edit(grams):
