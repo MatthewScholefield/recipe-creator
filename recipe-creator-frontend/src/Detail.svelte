@@ -4,7 +4,6 @@
   import { load, save, safeUrl } from './local';
   import { gramText, ingredientText, quantity, scaled } from './recipe';
   import type { Ingredient, Recipe } from './types';
-  import AuthorPicker from './AuthorPicker.svelte';
   import Photos from './Photos.svelte';
   import Button from './ui/Button.svelte';
   import Icon from './ui/Icon.svelte';
@@ -55,7 +54,6 @@
     navigate(`/recipes/${id(recipeId)}/edit`);
   }
 
-  function updateAuthor(result: Pick<Recipe, 'owner_id' | 'author_name' | 'revision'>) { if (recipe) recipe = {...recipe, ...result}; }
   function gramExplanation(row: Ingredient) {
     const details = [`As written: ${row.original_text || ingredientText(row)}`];
     const basis = typeof row.grams?.basis === 'string' ? row.grams.basis.trim() : '';
@@ -91,7 +89,7 @@
 {#if recipe}
 <article class="recipe">
 <BackLink href="/" label="Back to collection" />
-<div class="byline"><p class="eyebrow">From {recipe.author_name || 'Unknown author'}</p><AuthorPicker {recipe} onchanged={updateAuthor} /></div>
+<div class="byline"><p class="eyebrow">From {recipe.author_name || 'Unknown author'}</p></div>
 <h1>{recipe.title}</h1>
 <p class="prose lead">{recipe.description}</p>
 <div class="chips">{#each recipe.tags as tag}<Tag label={tag} href={`/?q=${encodeURIComponent(`tag:${tag}`)}`} />{/each}</div>

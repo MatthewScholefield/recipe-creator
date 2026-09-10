@@ -63,7 +63,13 @@ async def users(request: Request, q: str = Query(default="", max_length=100), st
         rows = [row for row in rows if row["state"] == "active" and not row.get("merged_into")]
     rows.sort(key=lambda row: (row["display_name"].casefold(), row["id"]))
     rows = [row for row in rows if q.casefold() in row["display_name"].casefold() or q.casefold() in row["id"].casefold()]
-    items = [public_user(row) for row in rows[start:start + limit]]
+    devices = await all_rows(request.app.state.repo, "devices")
+    last_login = {}
+    for device in devices:
+        user_id, timestamp = device.get("user_id"), device.get("last_used_at")
+        if user_id and timestamp and (user_id not in last_login or timestamp > last_login[user_id]):
+            last_login[user_id] = timestamp
+    items = [{**public_user(row), "last_login_at": last_login.get(row["id"])} for row in rows[start:start + limit]]
     return {"items": items, "users": items, "total": len(rows), "start": start, "limit": limit, "has_more": start + limit < len(rows)}
 
 

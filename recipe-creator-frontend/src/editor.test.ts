@@ -10,10 +10,10 @@ const identity = {user:{id:'u1',display_name:'Cook',state:'active',photo_trusted
 const anonymous = {...identity,user:null,device_id:null};
 const oldRow = {...ingredient(),id:'legacy-row',original_text:'  ½ cup stock ',quantity:'0.5',unit:'cup',name:'stock',grams:{amount:120,estimated:true,basis:'legacy'}};
 const recipe = {...blank('structured'),id:'r1',title:'Soup',revision:2,owner_id:'u1',author_name:'Cook',can_edit:true,directions:'  Simmer\n',ingredient_groups:[{id:'legacy-group',name:'',ingredients:[oldRow]}]};
-function mockApi(handler: (url: string, init?: RequestInit) => unknown | Promise<unknown>, named = true) {
+function mockApi(handler: (url: string, init?: RequestInit) => unknown | Promise<unknown>, named = true, currentIdentity = identity) {
   const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const path = String(url);
-    const body = path === '/api/session' ? (named ? identity : anonymous) : path === '/api/tags' ? {tags:['dinner','breakfast','asian'],classifier_tags:['breakfast','lunch','dinner','dessert']} : await handler(path, init);
+    const body = path === '/api/session' ? (named ? currentIdentity : anonymous) : path === '/api/tags' ? {tags:['dinner','breakfast','asian'],classifier_tags:['breakfast','lunch','dinner','dessert']} : await handler(path, init);
     return body instanceof Response ? body : new Response(JSON.stringify(body));
   });
   vi.stubGlobal('fetch', fetcher); return fetcher;
@@ -27,6 +27,16 @@ function lineResult(body: string) {
   return {items:lines.map(line => ({...line,method:'llm',ingredient:{...changedIngredient(ingredient(),line.text),id:line.id,name:'eggs',quantity:'2'}}))};
 }
 beforeEach(() => { localStorage.clear(); clearSession(); appState.identity = null; vi.restoreAllMocks(); });
+it('puts the searchable author field at the bottom of existing recipe edits for admins', async () => {
+  const adminIdentity = {...identity,admin:true};
+  mockApi(url => url === '/api/recipes/r1' ? recipe : {items:[],has_more:false}, true, adminIdentity);
+  render(Editor,{recipeId:'r1',navigate:vi.fn()});
+  const title = await screen.findByLabelText('Recipe title');
+  const author = screen.getByRole('combobox',{name:'Author'});
+  expect(title.compareDocumentPosition(author) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(author).toHaveValue('Cook');
+  expect(screen.queryByText('Change author')).not.toBeInTheDocument();
+});
 
 it('opens a nonblocking draft chooser without creating an empty draft and starts in text', async () => {
   mockApi(() => recipe); const first = localDraft(); localStorage.setItem('notebook:editor-mode', '"structured"');

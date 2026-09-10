@@ -8,6 +8,7 @@
   import { createDraft, saveDraft, readDraft, listDrafts, deleteDraft, draftHref, subscribeDrafts,
     migrateLegacyDraft, readLegacyDraft, recoverLegacyDraft, type LocalDraft, type LegacyDraft, type DraftSummary } from './drafts';
   import IdentityPrompt from './IdentityPrompt.svelte';
+  import AuthorPicker from './AuthorPicker.svelte';
   import TagPicker from './ui/TagPicker.svelte';
   import Tooltip from './ui/Tooltip.svelte';
   import Spinner from './ui/Spinner.svelte';
@@ -21,6 +22,7 @@
   const helpId = `publish-help-${crypto.randomUUID()}`;
   const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
   let draft = $state<RecipeDraft>(blank('text')), revision = $state<number>(), undo = $state<RecipeDraft>();
+  let editorRecipe = $state<Recipe>();
   let dirty = $state<Record<string, string>>({}), undoLines = $state<Record<string, string>>({});
   let ready = $state(false), allowed = $state(untrack(() => !recipeId)), busy = $state(false), parsing = $state(false);
   let error = $state(''), notice = $state(''), persisted = $state(''), conflict = $state(false), external = $state(false);
@@ -98,7 +100,7 @@
       try {
         if (recipeId) {
           const recipe = await request<Recipe>(`/recipes/${id(recipeId)}`, {signal: lifetime.signal}); if (!alive) return;
-          allowed = recipe.can_edit; revision = recipe.revision;
+          editorRecipe = recipe; allowed = recipe.can_edit; revision = recipe.revision;
           draft = Object.fromEntries(Object.keys(blank()).map(key => [key, recipe[key as keyof Recipe] ?? blank()[key as keyof RecipeDraft]])) as unknown as RecipeDraft;
           recovered = readLegacyDraft(recipeId); baseline = JSON.stringify(draft);
         } else {
@@ -284,6 +286,9 @@
         </details>
         {#if draft.mode === 'structured'}<details><summary>Preview and original text</summary><pre class="prose">{formatRecipe(draft)}</pre><h3>Original text</h3><pre class="prose">{draft.source_text}</pre></details>{/if}
       </fieldset>
+      {#if recipeId && editorRecipe}
+        <AuthorPicker recipe={editorRecipe} onchanged={(result) => {editorRecipe = {...editorRecipe!, ...result}; revision = result.revision; notice = `Author changed to ${result.author_name || 'Unknown author'}.`;}} />
+      {/if}
       {#if parsing}<div class="toolbar"><Spinner label="Organizing…" /><button type="button" onclick={cancelParse}>Cancel organizing</button></div>{/if}
       {#if busy}<div class="toolbar"><Spinner label="Saving recipe…" /><button type="button" onclick={() => {cancelWork(); notice = 'Save cancelled. Your draft is retained; retry uses the same publishing key.';}}>Cancel saving</button></div>{/if}
       {#if notice}<p role="status" class="notice">{notice}</p>{/if}

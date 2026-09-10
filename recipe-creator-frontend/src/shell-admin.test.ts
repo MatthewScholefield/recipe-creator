@@ -55,30 +55,36 @@ it('keeps neutral defaults on public copy failure and permits retry', async () =
   await refreshSiteCopy(); expect(appState.copy.site_title).toBe('Recipes'); expect(appState.copyError).toContain('could not be loaded');
   fail = false; await refreshSiteCopy(); expect(appState.copy.site_title).toBe('Kitchen'); expect(appState.copyError).toBe('');
 });
-it('hides author transfer for non-admins and uses revision guarded explicit save', async () => {
-  const fetcher = mockApi((url) => url === '/api/session' ? identity : url.startsWith('/api/admin/users?') ? {items:[{...user,id:'u2'},{...user,id:'u3'}],has_more:false} : {...recipe,owner_id:'u2',revision:3});
-  const onchanged = vi.fn(); render(AuthorPicker,{recipe,onchanged}); expect(screen.queryByText('Change author')).not.toBeInTheDocument();
-  flushSync(() => appState.identity = identity); await fireEvent.click(screen.getByRole('button',{name:'Change author'}));
-  await fireEvent.click(await screen.findByRole('button',{name:'Cook u2'})); expect(onchanged).not.toHaveBeenCalled();
-  await fireEvent.click(screen.getByRole('button',{name:'Save author'})); await waitFor(() => expect(onchanged).toHaveBeenCalledWith(expect.objectContaining({revision:3})));
+it('renders an inline author search, hides profile IDs, and saves a selection immediately', async () => {
+  const active = new Date(Date.now() - 2.5 * 60 * 60 * 1000).toISOString();
+  const fetcher = mockApi((url) => url === '/api/session' ? identity : url.startsWith('/api/admin/users?') ? {items:[{...user,id:'u2',last_login_at:active},{...user,id:'u3',last_login_at:null}],has_more:false} : {...recipe,owner_id:'u2',revision:3});
+  const onchanged = vi.fn(); render(AuthorPicker,{recipe,onchanged}); expect(screen.queryByLabelText('Author')).not.toBeInTheDocument();
+  flushSync(() => appState.identity = identity);
+  const input = screen.getByRole('combobox',{name:'Author'}); expect(input).toHaveValue('Cook');
+  await fireEvent.focus(input);
+  const option = await screen.findByRole('option',{name:'Cook Active 2 hours ago'});
+  expect(screen.queryByText('u2')).not.toBeInTheDocument();
+  await fireEvent.click(option); await waitFor(() => expect(onchanged).toHaveBeenCalledWith(expect.objectContaining({revision:3})));
   expect(recipe.revision).toBe(2); const write = fetcher.mock.calls.find(([url]) => String(url).endsWith('/owner')); expect(JSON.parse(write![1]!.body as string)).toEqual({owner_id:'u2',expected_revision:2});
   expect(fetcher.mock.calls.some(([url]) => String(url).includes('eligible_owner=true'))).toBe(true);
 });
-it('keeps author selection on 409 without allowing a blind overwrite', async () => {
+it('reverts the author field after a revision conflict', async () => {
   appState.identity = identity;
-  mockApi(url => url === '/api/session' ? identity : url.includes('/users?') ? {items:[{...user,id:'u2'}],has_more:false} : new Response(JSON.stringify({detail:'Conflict'}),{status:409}));
-  const onchanged = vi.fn(); render(AuthorPicker,{recipe,onchanged}); await fireEvent.click(screen.getByRole('button',{name:'Change author'}));
-  await fireEvent.click(await screen.findByRole('button',{name:'Cook u2'})); await fireEvent.click(screen.getByRole('button',{name:'Save author'}));
-  expect(await screen.findByRole('alert')).toHaveTextContent('selection has been kept'); expect(screen.getByRole('button',{name:'Cook u2'})).toHaveAttribute('aria-pressed','true'); expect(screen.getByRole('button',{name:'Save author'})).toBeDisabled(); expect(onchanged).not.toHaveBeenCalled();
+  mockApi(url => url === '/api/session' ? identity : url.includes('/users?') ? {items:[{...user,id:'u2',display_name:'Other Cook',last_login_at:null}],has_more:false} : new Response(JSON.stringify({detail:'Conflict'}),{status:409}));
+  const onchanged = vi.fn(); render(AuthorPicker,{recipe,onchanged});
+  const input = screen.getByRole('combobox',{name:'Author'}); await fireEvent.input(input,{target:{value:'Other'}});
+  await fireEvent.click(await screen.findByRole('option',{name:'Other Cook Activity unknown'}));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Reload the recipe'); expect(input).toHaveValue('Cook'); expect(onchanged).not.toHaveBeenCalled();
 });
 it('ignores stale author search responses and pages eligible results', async () => {
-  appState.identity = identity; let finish!: (value: unknown) => void;
-  mockApi(url => url.includes('q=old') ? new Promise(resolve => finish = resolve) : {items:[{...user,id:url.includes('start=20') ? 'next' : 'fresh'}],has_more:!url.includes('start=20')});
-  render(AuthorPicker,{recipe,onchanged:vi.fn()}); await fireEvent.click(screen.getByRole('button',{name:'Change author'}));
-  await fireEvent.input(screen.getByLabelText('Find a profile'),{target:{value:'old'}}); await waitFor(() => expect(finish).toBeTypeOf('function'));
-  await fireEvent.input(screen.getByLabelText('Find a profile'),{target:{value:'new'}}); await screen.findByRole('button',{name:'Cook fresh'});
-  finish({items:[{...user,id:'stale'}],has_more:false}); await new Promise(resolve => setTimeout(resolve,20)); expect(screen.queryByRole('button',{name:'Cook stale'})).toBeNull();
-  await fireEvent.click(screen.getByRole('button',{name:'More profiles'})); await screen.findByRole('button',{name:'Cook next'});
+  appState.identity = identity;
+  const deferred = (Promise as PromiseConstructor & {withResolvers<T>(): {promise: Promise<T>; resolve(value: T): void; reject(reason?: unknown): void}}).withResolvers<unknown>();
+  const fetcher = mockApi(url => url.includes('q=old') ? deferred.promise : {items:[{...user,id:url.includes('start=20') ? 'next' : 'fresh',last_login_at:null}],has_more:!url.includes('start=20')});
+  render(AuthorPicker,{recipe,onchanged:vi.fn()}); const input = screen.getByRole('combobox',{name:'Author'});
+  await fireEvent.input(input,{target:{value:'old'}}); await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url).includes('q=old'))).toBe(true));
+  await fireEvent.input(input,{target:{value:'new'}}); await screen.findByRole('option',{name:'Cook Activity unknown'});
+  deferred.resolve({items:[{...user,id:'stale',last_login_at:null}],has_more:false}); await Promise.resolve(); expect(screen.queryByText('stale')).toBeNull();
+  await fireEvent.click(screen.getByRole('button',{name:'More profiles'})); await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url).includes('start=20'))).toBe(true));
 });
 it('shows anonymous profile menu and preserves saved search tag parameters', async () => {
   history.replaceState({}, '', '/saved?tag=dinner&tag=vegan'); vi.stubGlobal('scrollTo',vi.fn());

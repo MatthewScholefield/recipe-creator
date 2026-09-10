@@ -3,6 +3,7 @@ import type { components } from './api.generated';
 type Schemas = components['schemas'];
 
 export type User = Schemas['PublicUser'];
+export type AdminUser = Schemas['AdminUser'];
 export type Session = Schemas['SessionResponse'];
 export type GramEstimate = Schemas['GramEstimate'];
 // Editor state keeps output-only estimates; the write API discards them.

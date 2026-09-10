@@ -1,5 +1,6 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from threading import get_ident
+from types import SimpleNamespace
 
 from recipe_creator import admin
 
@@ -15,6 +16,27 @@ async def login(browser):
         session = await profile(browser, 'Operator')
     repo = browser._transport.app.state.repo
     await repo.update('users', session['user']['id'], {'is_admin': True})
+
+
+async def test_admin_users_reports_latest_device_activity(monkeypatch):
+    user = {"id": "user", "display_name": "Cook", "state": "active", "photo_trust": False}
+    older, latest = now() - timedelta(days=2), now() - timedelta(hours=2)
+
+    class Repo:
+        async def list(self, table, filters=None, limit=500, start=0):
+            rows = [user] if table == "users" else [
+                {"user_id": "user", "last_used_at": older},
+                {"user_id": "user", "last_used_at": latest},
+            ]
+            return rows[start:start + limit]
+
+    async def allow(_request):
+        return None
+
+    monkeypatch.setattr(admin, "require_admin", allow)
+    result = await admin.users(SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(repo=Repo()))),
+                               q="", start=0, limit=20, eligible_owner=True)
+    assert result["items"][0]["last_login_at"] == latest
 
 
 @pytest.mark.integration
@@ -46,8 +68,15 @@ async def test_admin_users_owner_revisions_restore_and_audit(identity_app):
         recipe = await repo.create("recipes", {"title": "Original", "source_text": "Do not rewrite me", "status": "published"})
         assert (await browser.post(f"/admin/recipes/{recipe['id']}/owner", json={"owner_id": user["id"], "expected_revision": 1})).status_code == 403
         await login(browser)
+        current = (await browser.get("/session")).json()
+        await repo.update("devices", current["device_id"], {"last_used_at": now() - timedelta(days=5)})
+        latest = now() - timedelta(hours=2)
+        await repo.create("devices", {"user_id": user["id"], "secret_hash": digest("other-device"),
+                                      "last_used_at": latest, "expires_at": now() + timedelta(days=1)})
         users = (await browser.get("/admin/users", params={"q": "alice"})).json()
         assert users["total"] == 1 and users["items"] == users["users"]
+        observed = datetime.fromisoformat(users["items"][0]["last_login_at"].replace("Z", "+00:00"))
+        assert observed == latest
         patch = await browser.patch("/admin/users/" + user["id"], json={"photo_trusted": True})
         assert patch.json()["user"]["photo_trusted"]
         assert (await repo.get("users", user["id"]))["photo_trust"]

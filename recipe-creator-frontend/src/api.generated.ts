@@ -608,12 +608,27 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AdminUser */
+        AdminUser: {
+            /** Id */
+            id: string;
+            /** Display Name */
+            display_name: string;
+            /** State */
+            state: string;
+            /** Photo Trusted */
+            photo_trusted: boolean;
+            /** Merged Into */
+            merged_into?: string | null;
+            /** Last Login At */
+            last_login_at?: string | null;
+        };
         /** AdminUsersResponse */
         AdminUsersResponse: {
             /** Users */
-            users: components["schemas"]["PublicUser"][];
+            users: components["schemas"]["AdminUser"][];
             /** Items */
-            items: components["schemas"]["PublicUser"][];
+            items: components["schemas"]["AdminUser"][];
             /** Total */
             total: number;
             /** Start */

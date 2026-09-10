@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -198,6 +199,10 @@ class PublicUser(BaseModel):
     merged_into: str | None = None
 
 
+class AdminUser(PublicUser):
+    last_login_at: datetime | None = None
+
+
 class SessionResponse(BaseModel):
     user: PublicUser | None
     device_id: str | None
@@ -206,8 +211,8 @@ class SessionResponse(BaseModel):
 
 
 class AdminUsersResponse(BaseModel):
-    users: list[PublicUser]
-    items: list[PublicUser]
+    users: list[AdminUser]
+    items: list[AdminUser]
     total: int
     start: int
     limit: int
