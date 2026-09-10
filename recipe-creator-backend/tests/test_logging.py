@@ -150,3 +150,46 @@ async def test_job_polling_failure_logs_exception(monkeypatch):
     assert logger.calls == [("Enrichment polling failed", ())]
     assert isinstance(logger.exception, RuntimeError)
     assert str(logger.exception) == "provider secret token"
+
+
+async def test_ingredient_enrichment_failure_logs_exception(monkeypatch, log_output):
+    recipe = {
+        "id": "r",
+        "revision": 1,
+        "source_text": "",
+        "ingredient_groups": [],
+    }
+    job = {
+        "id": "j",
+        "recipe_id": "r",
+        "input_revision": 1,
+        "input_hash": jobs.enrichment_hash(recipe),
+    }
+
+    class Repository:
+        async def get(self, table, identifier):
+            assert (table, identifier) == ("recipes", "r")
+            return recipe
+
+    runner = jobs.JobRunner(Repository(), Settings())
+    finished = []
+
+    async def claim():
+        return job
+
+    async def fail(*args, **kwargs):
+        raise RuntimeError("provider failure details")
+
+    async def finish(claimed, groups=None, error=None):
+        finished.append((claimed, error))
+
+    monkeypatch.setattr(runner, "_claim", claim)
+    monkeypatch.setattr(runner, "_finish", finish)
+    monkeypatch.setattr(jobs, "enrich_recipe", fail)
+
+    assert await runner.run_once()
+    assert finished == [(job, "RuntimeError")]
+    output = log_output.getvalue()
+    assert "Ingredient enrichment failed" in output
+    assert "RuntimeError: provider failure details" in output
+    assert "Traceback" in output

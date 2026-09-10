@@ -237,5 +237,6 @@ class JobRunner:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            logger.opt(exception=exc).error("Ingredient enrichment failed")
             await self._finish(job, error=type(exc).__name__)
         return True
