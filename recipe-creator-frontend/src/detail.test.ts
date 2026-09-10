@@ -2,13 +2,14 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { expect, it, vi } from 'vitest';
 import Detail from './Detail.svelte';
 import { blank, ingredient } from './recipe';
+import type { Recipe } from './types';
 
 const identity = {user:{id:'u1',display_name:'Cook',state:'active',photo_trusted:false},device_id:'d1',admin:false,csrf_token:'csrf'};
-const recipe = {...blank('structured'),id:'r1',title:'Soup',revision:2,owner_id:'u1',author_name:'Cook',can_edit:true,enrichment_status:'complete',directions:'Simmer.',ingredient_groups:[{id:'g1',name:'Ingredients',ingredients:[{...ingredient(),id:'i1',name:'flour',quantity:'1',unit:'cup',original_text:'1 cup flour',grams:{amount:120,low:null,high:null,estimated:false,basis:'flour'}}]}]};
+const recipe: Recipe = {...blank('structured'),id:'r1',title:'Soup',revision:2,owner_id:'u1',author_name:'Cook',can_edit:true,enrichment_status:'complete',directions:'Simmer.',ingredient_groups:[{id:'g1',name:'Ingredients',ingredients:[{...ingredient(),id:'i1',name:'flour',quantity:'1',unit:'cup',original_text:'1 cup flour',grams:{amount:120,low:null,high:null,estimated:false,basis:'flour'}}]}]};
 
-function mockApi() { const fetcher = vi.fn(async (url: string | URL, init?: RequestInit) => {
+function mockApi(value = recipe) { const fetcher = vi.fn(async (url: string | URL, init?: RequestInit) => {
   const path = String(url);
-  if (path === '/api/recipes/r1') return new Response(JSON.stringify(recipe));
+  if (path === '/api/recipes/r1') return new Response(JSON.stringify(value));
   if (path === '/api/session') return new Response(JSON.stringify(identity));
   if (path === '/api/photos?recipe_id=r1' || path === '/api/photos?mine=true') return new Response(JSON.stringify({items:[]}));
   if (init?.method === 'DELETE') return new Response(null, {status:204});
@@ -62,6 +63,25 @@ it('opens scaling controls and anchors original amounts to gram amounts only', a
   const grams = screen.getByText('120 g'); await fireEvent.mouseEnter(grams.parentElement!);
   expect(await screen.findByRole('tooltip')).toHaveTextContent('As written: 1 cup flour');
 });
+it('flags unscalable ingredients and explains unavailable gram conversions', async () => {
+  const unavailable = {...recipe,ingredient_groups:[{id:'g1',name:'Ingredients',ingredients:[
+    {...ingredient(),id:'i1',original_text:'⅗ cup tapioca starch/flour, plus more for sprinkling'},
+    {...ingredient(),id:'i2',quantity:'1',unit:'cup',name:'flour',original_text:'1 cup flour'},
+  ]}]};
+  mockApi(unavailable); const view = render(Detail,{recipeId:'r1',navigate:vi.fn()});
+  await screen.findByRole('heading',{name:'Soup'});
+  await fireEvent.click(screen.getByRole('button',{name:'Adjust ingredient scale'}));
+  await fireEvent.click(screen.getByRole('button',{name:'2×'}));
+  expect(view.container.querySelector('.scale-badge')).toHaveTextContent('2×');
+  expect(screen.getByText('⅗ cup tapioca starch/flour, plus more for sprinkling')).toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Grams'}));
+  const amount = screen.getByRole('button',{name:'2 cup'});
+  expect(amount).toHaveClass('unavailable');
+  await fireEvent.mouseEnter(amount.closest('.tooltip-wrap')!);
+  expect(await screen.findByRole('tooltip')).toHaveTextContent('No gram conversion is available');
+  expect(screen.getByText('flour')).toBeInTheDocument();
+});
+
 
 it('renders photos directly at the bottom instead of behind a photos toggle', async () => {
   mockApi(); render(Detail,{recipeId:'r1',navigate:vi.fn()}); await screen.findByRole('heading',{name:'Soup'});

@@ -2,7 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import { request, mutate, message, id } from './api';
   import { load, save, safeUrl } from './local';
-  import { ingredientText, quantity } from './recipe';
+  import { ingredientText, quantity, scaled } from './recipe';
   import type { Ingredient, Recipe } from './types';
   import AuthorPicker from './AuthorPicker.svelte';
   import Photos from './Photos.svelte';
@@ -40,6 +40,17 @@
   function scaledAmount(value: number | string) { return new Intl.NumberFormat('en', {maximumFractionDigits: 3}).format(Number(value) * factor); }
   function hasGramAmount(row: Ingredient) { return row.grams?.amount != null && quantity(String(row.grams.amount)) !== null; }
   function gramTail(row: Ingredient) { return `${row.name || row.original_text}${row.preparation ? `, ${row.preparation}` : ''}${row.optional ? ' (optional)' : ''}`; }
+  function originalAmount(row: Ingredient) {
+    if (!row.name) return '';
+    const range = row.quantity_max ? `–${scaled(row.quantity_max, factor)}` : '';
+    return [scaled(row.quantity, factor) + range, row.unit].filter(Boolean).join(' ');
+  }
+  function ingredientTail(row: Ingredient) {
+    return `${row.name}${row.preparation ? `, ${row.preparation}` : ''}${row.optional ? ' (optional)' : ''}`;
+  }
+  function scaleBadge(row: Ingredient) {
+    return factor !== 1 && (!grams || !hasGramAmount(row)) && (!row.name || quantity(row.quantity) === null);
+  }
 </script>
 {#if error}<p class="notice error" role="alert">{error} <button onclick={fetchRecipe}>Reload recipe</button></p>{/if}
 {#if recipe}
@@ -71,7 +82,16 @@
   </div>{/if}
 </section>
 <div class="recipe-columns">
-<section><h2 class="sr-only">Ingredients</h2>{#each recipe.ingredient_groups as group}<section class="ingredients">{#if group.name && recipe.ingredient_groups.length > 1}<h3>{group.name}</h3>{/if}{#each group.ingredients as row}<div class:checked={checked.includes(row.id)}><label class="ingredient"><input type="checkbox" checked={checked.includes(row.id)} onchange={() => checked = checked.includes(row.id) ? checked.filter(value => value !== row.id) : [...checked, row.id]}>{#if grams && hasGramAmount(row)}<span>{row.grams?.estimated === false ? '' : '≈ '}<Tooltip text={`As written: ${row.original_text || ingredientText(row)}`}><button type="button" class="gram-amount" style="border:0;padding:0;background:none;color:inherit;font:inherit">{scaledAmount(row.grams!.amount!)} g</button></Tooltip>{' '}{row.name || row.original_text}{row.preparation ? `, ${row.preparation}` : ''}{row.optional ? ' (optional)' : ''}</span>{:else}<span>{ingredientText(row,factor)}</span>{/if}</label></div>{/each}</section>{/each}</section>
+<section><h2 class="sr-only">Ingredients</h2>{#each recipe.ingredient_groups as group}<section class="ingredients">{#if group.name && recipe.ingredient_groups.length > 1}<h3>{group.name}</h3>{/if}{#each group.ingredients as row}<div class:checked={checked.includes(row.id)}><label class="ingredient"><input type="checkbox" checked={checked.includes(row.id)} onchange={() => checked = checked.includes(row.id) ? checked.filter(value => value !== row.id) : [...checked, row.id]}>
+  {#if scaleBadge(row)}<span class="scale-badge">{scaledAmount(1)}×</span>{/if}
+  {#if grams && hasGramAmount(row)}
+    <span>{row.grams?.estimated === false ? '' : '≈ '}<Tooltip text={`As written: ${row.original_text || ingredientText(row)}`}><button type="button" class="gram-amount">{scaledAmount(row.grams!.amount!)} g</button></Tooltip>{' '}{gramTail(row)}</span>
+  {:else if grams}
+    <span><Tooltip text="No gram conversion is available. This amount remains in the original units."><button type="button" class="gram-amount unavailable">{originalAmount(row) || ingredientText(row,factor)}</button></Tooltip>{#if originalAmount(row)}{' '}{ingredientTail(row)}{/if}</span>
+  {:else}
+    <span>{ingredientText(row,factor)}</span>
+  {/if}
+</label></div>{/each}</section>{/each}</section>
 <section><h2>Directions</h2><div class="prose">{recipe.directions}</div></section>
 </div>
 {#if recipe.notes}<section><h2>Notes</h2><div class="prose">{recipe.notes}</div></section>{/if}
@@ -83,5 +103,5 @@
 {:else if !error}<p role="status">Opening the recipe…</p>{/if}
 
 <style>
-  .byline,.controls-heading{display:flex;align-items:center;gap:.5rem}.byline .eyebrow{margin:0}.controls-heading{justify-content:space-between}.controls-heading h2{margin:0}.small-control{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:.3rem .5rem;border:1px solid transparent;border-radius:.4rem;background:transparent;color:var(--ui-text);cursor:pointer}.small-control:hover,.small-control.selected{border-color:var(--ui-control-border);background:var(--ui-surface)}.scale-panel{margin-top:.5rem;padding:.65rem;border:1px solid var(--ui-control-border);border-radius:.5rem;background:var(--ui-surface-muted)}.scale-panel .toolbar{margin:.25rem 0}.scale-panel label{display:inline-flex;align-items:center;gap:.35rem}.scale-panel input{width:5.5rem}.gram-amount{text-decoration:underline dotted;text-underline-offset:.18em;cursor:help}.dialog-actions{display:flex;justify-content:flex-end;gap:.5rem;margin-top:1.25rem}.photos{margin-top:2rem}
+  .byline,.controls-heading{display:flex;align-items:center;gap:.5rem}.byline .eyebrow{margin:0}.controls-heading{justify-content:space-between}.controls-heading h2{margin:0}.small-control{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:.3rem .5rem;border:1px solid transparent;border-radius:.4rem;background:transparent;color:var(--ui-text);cursor:pointer}.small-control:hover,.small-control.selected{border-color:var(--ui-control-border);background:var(--ui-surface)}.scale-panel{margin-top:.5rem;padding:.65rem;border:1px solid var(--ui-control-border);border-radius:.5rem;background:var(--ui-surface-muted)}.scale-panel .toolbar{margin:.25rem 0}.scale-panel label{display:inline-flex;align-items:center;gap:.35rem}.scale-panel input{width:5.5rem}.gram-amount{border:0;padding:0;background:none;color:inherit;font:inherit;text-decoration:underline dotted;text-underline-offset:.18em;cursor:help}.gram-amount.unavailable{text-decoration-color:#bd6518}.scale-badge{display:inline-block;margin-right:.35rem;padding:.05rem .3rem;border-radius:.3rem;background:#f6d2ad;color:#7a3900;font-size:.72rem;font-weight:700;line-height:1.35;vertical-align:.12em}.dialog-actions{display:flex;justify-content:flex-end;gap:.5rem;margin-top:1.25rem}.photos{margin-top:2rem}
 </style>
