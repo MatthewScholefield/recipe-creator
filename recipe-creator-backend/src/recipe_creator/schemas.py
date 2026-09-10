@@ -4,7 +4,6 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .ingredients import parse_quantity
 
 
 MEAL_CLASSIFIERS = ('breakfast', 'lunch', 'dinner', 'dessert')
@@ -64,21 +63,6 @@ class Ingredient(StrictDTO):
             value = {key: item for key, item in value.items() if not key.startswith("grams")}
         return value
 
-    @field_validator("quantity", "quantity_max")
-    @classmethod
-    def valid_amount(cls, value):
-        if value is not None:
-            parsed = parse_quantity(value)
-            if parsed is None or parsed[0] != parsed[1] or parsed[1] > 1_000_000_000:
-                raise ValueError("Use a finite decimal or fraction")
-        return value
-
-    @model_validator(mode="after")
-    def ordered_range(self):
-        if self.quantity_max is not None:
-            if self.quantity is None or parse_quantity(self.quantity_max)[0] < parse_quantity(self.quantity)[0]:
-                raise ValueError("Quantity maximum must not be below quantity")
-        return self
 
 
 class IngredientGroup(StrictDTO):
@@ -121,13 +105,6 @@ class RecipeDraft(StrictDTO):
             raise ValueError("Title is required")
         return value
 
-    @field_validator("yield_amount")
-    @classmethod
-    def positive_yield(cls, value):
-        value = Ingredient.valid_amount(value)
-        if value is not None and parse_quantity(value)[0] <= 0:
-            raise ValueError("Yield must be positive")
-        return value
 
     @field_validator("source_url")
     @classmethod

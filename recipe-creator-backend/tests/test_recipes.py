@@ -31,8 +31,7 @@ def draft(**changes):
 @pytest.mark.parametrize("changes", [
     {"title": " "}, {"title": 3}, {"mode": "source"}, {"title": "x" * 301},
     {"source_url": "javascript:alert(1)"}, {"source_url": "https://user:pass@example.com"},
-    {"source_url": "https://example.com\n"}, {"yield_amount": "NaN"},
-    {"yield_amount": "1/0"}, {"yield_amount": "0"}, {"unknown": True},
+    {"source_url": "https://example.com\n"}, {"unknown": True},
 ])
 def test_strict_draft(changes):
     with pytest.raises(ValidationError):
@@ -40,18 +39,20 @@ def test_strict_draft(changes):
 
 
 def test_exact_strings_bounds_and_untrusted_estimates():
-    value = draft(owner_id="forged", photo_trusted=True, source_url="https://example.com/source", yield_amount="1 1/2")
+    value = draft(owner_id="forged", photo_trusted=True, source_url="https://example.com/source", yield_amount="about 6")
     row = value["ingredient_groups"][0]["ingredients"][0]
-    row.update(grams={"amount": 100, "source": "author_confirmed"}, grams_input_hash="forged", grams_confirmed=True)
+    row.update(quantity="1 or 2", quantity_max="to taste",
+               grams={"amount": 100, "source": "author_confirmed"},
+               grams_input_hash="forged", grams_confirmed=True)
     parsed = RecipeDraft.model_validate(value)
     assert parsed.source_text == value["source_text"]
     assert parsed.directions == value["directions"]
+    assert parsed.yield_amount == "about 6"
+    assert parsed.ingredient_groups[0].ingredients[0].quantity == "1 or 2"
+    assert parsed.ingredient_groups[0].ingredients[0].quantity_max == "to taste"
     assert parsed.ingredient_groups[0].ingredients[0].grams is None
     assert "owner_id" not in parsed.model_dump()
     assert recipes._content(parsed)["ingredient_groups"][0]["ingredients"][0].get("grams") is None
-    row["quantity"] = "1/0"
-    with pytest.raises(ValidationError):
-        RecipeDraft.model_validate(value)
 
 
 def test_search_prototype_semantics():
