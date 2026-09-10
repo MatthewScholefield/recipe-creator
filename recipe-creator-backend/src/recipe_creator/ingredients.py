@@ -5,6 +5,7 @@ import json
 import math
 import re
 from copy import deepcopy
+from decimal import Context, Decimal, ROUND_HALF_EVEN, localcontext
 from fractions import Fraction
 from hashlib import sha256
 from unicodedata import normalize
@@ -40,32 +41,114 @@ _ESTIMATION_UNITS = "|".join(
 )
 
 
-def parse_quantity(value: str | float | None) -> tuple[float, float] | None:
-    """Return an inclusive range; reject ambiguous, negative and nonfinite amounts."""
-    if value is None or isinstance(value, bool):
-        return None
+def _quantity_parts(value: str | float) -> list[str]:
     text = str(value).strip().replace("⁄", "/")
     for glyph, fraction in _VULGAR.items():
         text = text.replace(glyph, " " + fraction)
-    parts = re.split(r"\s*(?:[–—-]|\bto\b)\s*", text)
+    return re.split(r"\s*(?:[–—-]|\bto\b)\s*", text)
+
+
+def _parse_rational(part: str) -> Fraction:
+    part = part.strip()
+    if not re.fullmatch(
+        r"(?:\d+(?:\.\d+)?|\.\d+|\d+\s*/\s*\d+|\d+\s+\d+\s*/\s*\d+)",
+        part,
+    ):
+        raise ValueError("Not an amount")
+    part = re.sub(r"\s*/\s*", "/", part)
+    return sum((Fraction(piece) for piece in part.split()), Fraction())
+
+
+def _parse_quantity_rational(
+    value: str | float | None,
+) -> tuple[Fraction, Fraction] | None:
+    if value is None or isinstance(value, bool):
+        return None
+    parts = _quantity_parts(value)
     if len(parts) not in (1, 2):
         return None
-
-    def number(part: str) -> float:
-        part = part.strip()
-        if not re.fullmatch(r"(?:\d+(?:\.\d+)?|\.\d+|\d+\s*/\s*\d+|\d+\s+\d+\s*/\s*\d+)", part):
-            raise ValueError("Not an amount")
-        part = re.sub(r"\s*/\s*", "/", part)
-        return float(sum((Fraction(p) for p in part.split()), Fraction()))
-
     try:
-        values = [number(p) for p in parts]
+        values = [_parse_rational(part) for part in parts]
     except (ValueError, ZeroDivisionError, OverflowError):
         return None
     low, high = values[0], values[-1]
-    return (low, high) if 0 <= low <= high and math.isfinite(high) else None
+    return (low, high) if 0 <= low <= high else None
 
 
+def parse_quantity(value: str | float | None) -> tuple[float, float] | None:
+    """Return an inclusive range; reject ambiguous, negative and nonfinite amounts."""
+    amount = _parse_quantity_rational(value)
+    if amount is None:
+        return None
+    try:
+        result = tuple(float(endpoint) for endpoint in amount)
+    except (OverflowError, ValueError):
+        return None
+    return result if all(math.isfinite(endpoint) for endpoint in result) else None
+
+
+def _plain_decimal(value: Fraction, source: str) -> str | None:
+    source = source.strip()
+    if "/" in source:
+        with localcontext(Context(prec=17, rounding=ROUND_HALF_EVEN)):
+            decimal = Decimal(value.numerator) / Decimal(value.denominator)
+    else:
+        decimal = Decimal(source)
+    text = format(decimal, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    text = text or "0"
+    try:
+        usable = len(text) <= 64 and math.isfinite(float(text))
+    except (OverflowError, ValueError):
+        usable = False
+    return text if usable else None
+
+
+def normalize_quantity_fields(
+    quantity: str | None, quantity_max: str | None
+) -> tuple[str | None, str | None]:
+    """Normalize valid structured scalar amounts without guessing invalid ranges."""
+    amount = _parse_quantity_rational(quantity)
+    if quantity is None or amount is None:
+        return quantity, quantity_max
+
+    parts = _quantity_parts(quantity)
+    if len(parts) == 2:
+        if quantity_max is not None:
+            maximum = _parse_quantity_rational(quantity_max)
+            maximum_parts = _quantity_parts(quantity_max)
+            if (
+                maximum is None
+                or len(maximum_parts) != 1
+                or maximum[0] != amount[1]
+            ):
+                return quantity, quantity_max
+        normalized = (
+            _plain_decimal(amount[0], parts[0]),
+            _plain_decimal(amount[1], parts[1]),
+        )
+        return normalized if all(value is not None for value in normalized) else (
+            quantity,
+            quantity_max,
+        )
+
+    low = _plain_decimal(amount[0], parts[0])
+    if low is None:
+        return quantity, quantity_max
+    if quantity_max is None:
+        return low, None
+
+    maximum = _parse_quantity_rational(quantity_max)
+    maximum_parts = _quantity_parts(quantity_max)
+    if (
+        maximum is None
+        or len(maximum_parts) != 1
+        or maximum[0] < amount[0]
+    ):
+        return quantity, quantity_max
+    high = _plain_decimal(maximum[0], maximum_parts[0])
+    return (low, high) if high is not None else (quantity, quantity_max)
 
 
 def convert_to_grams(quantity, unit: str | None) -> tuple[float, float] | None:

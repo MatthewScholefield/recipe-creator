@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { components } from './api.generated';
 import type { GramEstimate, Recipe, RecipeDraft } from './types';
-import { blank, ingredient, quantity, scaled, gramEstimateText, gramText, ingredientText, formatRecipe, applyParse, ParseGuard, move, ingredientLine, changedIngredient, dirtyIngredientLines, applyIngredientLines, withoutEmptyIngredients, normalizeTags, tagError, classifierMessage } from './recipe';
+import { blank, ingredient, quantity, scaled, ingredientAmount, gramEstimateText, gramText, ingredientText, formatRecipe, applyParse, ParseGuard, move, ingredientLine, changedIngredient, dirtyIngredientLines, applyIngredientLines, withoutEmptyIngredients, normalizeTags, tagError, classifierMessage } from './recipe';
 import { load, save, safeUrl, translateLegacy } from './local';
 describe('generated API contract', () => {
   it('links recipe fields and retains extensible server gram estimates in editor state', () => {
@@ -36,8 +36,51 @@ describe('lossless recipe representations', () => {
   it('supports keyboard reorder without changing content', () => {expect(move(['a','b','c'], 1, -1)).toEqual(['b','a','c']); expect(move(['a'],0,-1)).toEqual(['a']);});
 });
 describe('safe ingredient quantities', () => {
-  it.each([['½',0.5],['1½',1.5],['2 1/4',2.25],['0.25',0.25],['1/0',null],['to taste',null],['-2',null],['1–2',null]])('parses %s without guessing', (text, expected) => {expect(quantity(text as string)).toBe(expected);});
-  it('scales fractions and ranges only in ingredients', () => {const row = {...ingredient(), quantity:'1/2', quantity_max:'1', unit:'cup', name:'flour'}; expect(ingredientText(row,2)).toBe('1–2 cup flour'); expect(scaled('to taste',2)).toBe('to taste');});
+  it.each([
+    ['½',0.5], ['1½',1.5], ['2 1/4',2.25], ['⅗',0.6], ['1 ⁄ 3',1 / 3],
+    ['⅚',5 / 6], ['0.25',0.25], ['.25',0.25], ['1/0',null],
+    ['to taste',null], ['-2',null], ['1–2',null], ['9'.repeat(400),null],
+  ])('parses %s without guessing', (text, expected) => {
+    expect(quantity(text as string)).toBe(expected);
+  });
+  it('formats only exact unit-preferred fractions from unrounded values', () => {
+    const row = ingredient();
+    expect(ingredientAmount({...row, quantity:'0.5', unit:'cup'})).toBe('½ cup');
+    expect(ingredientAmount({...row, quantity:'0.5', unit:'cup'}, 3)).toBe('1 ½ cup');
+    expect(ingredientAmount({...row, quantity:'0.6', unit:'cup'})).toBe('0.6 cup');
+    expect(ingredientAmount({...row, quantity:'0.6', unit:'cup'}, 2)).toBe('1.2 cup');
+    expect(ingredientAmount({...row, quantity:'⅗', unit:'cup'})).toBe('0.6 cup');
+    expect(ingredientAmount({...row, quantity:'0.333', unit:'tsp'})).toBe('0.333 tsp');
+    expect(ingredientAmount({...row, quantity:'0.33333333333333333', unit:'tsp'})).toBe('⅓ tsp');
+    expect(ingredientAmount({...row, quantity:'0.5', unit:'g'})).toBe('0.5 g');
+    expect(ingredientAmount({...row, quantity:'0.5', unit:'eggs'})).toBe('0.5 eggs');
+    expect(ingredientAmount({...row, quantity:'0.25', unit:'Fluid   Ounces'})).toBe('¼ Fluid   Ounces');
+    expect(ingredientAmount({...row, quantity:'0.5', unit:'fl. oz.'})).toBe('½ fl. oz.');
+    expect(ingredientAmount({
+      ...row, quantity:'0.25', quantity_max:'0.75', unit:'tablespoons',
+    })).toBe('¼–¾ tablespoons');
+    expect(ingredientAmount({...row, quantity:'0.5', unit:'cup'}, 0)).toBe('0.5 cup');
+  });
+  it('uses the same readable amount in generated recipe text', () => {
+    const draft = blank('structured');
+    draft.ingredient_groups = [{
+      id:'group',
+      name:'Ingredients',
+      ingredients:[{
+        ...ingredient(),
+        original_text:'0.5 cup flour',
+        quantity:'0.5',
+        unit:'cup',
+        name:'flour',
+      }],
+    }];
+    expect(formatRecipe(draft)).toBe('Ingredients\n½ cup flour');
+  });
+  it('scales fractions and ranges only in ingredients', () => {
+    const row = {...ingredient(), quantity:'1/2', quantity_max:'1', unit:'cup', name:'flour'};
+    expect(ingredientAmount(row, 2)).toBe('1–2 cup');
+    expect(scaled('to taste',2)).toBe('to taste');
+  });
   it('shows one recommended estimate and keeps its uncertainty available', () => {const row = {...ingredient(), original_text:'one cup flour', quantity:'1', unit:'cup', name:'flour', grams:{amount:120, estimated:true, basis:'Estimated from a cup of flour'}}; expect(ingredientText(row,2,true)).toBe('≈ 240 g flour'); const ranged = {...row,grams:{amount:null,low:110,high:130,estimated:true,basis:'Range'}}; expect(gramText(ranged,2)).toBe('240 g'); expect(gramEstimateText(ranged,2)).toBe('240 ± 20 g'); expect(ingredientText(ranged,2,true)).toBe('≈ 240 g flour'); expect(row.original_text).toBe('one cup flour'); expect(ingredientText({...row, grams:null},2,true)).toBe('2 cup flour');});
 });
 describe('ingredient line editing', () => {

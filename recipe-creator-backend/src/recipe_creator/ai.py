@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from weakref import WeakKeyDictionary
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_ai import (
     Agent,
     AgentRunResultEvent,
@@ -25,7 +25,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.usage import UsageLimits
 
-from .ingredients import REGIONAL_ASSUMPTION
+from .ingredients import REGIONAL_ASSUMPTION, normalize_quantity_fields
 from .repository import ConflictError
 from .settings import Settings
 
@@ -48,6 +48,14 @@ class ParsedIngredient(StrictSchema):
     preparation: str = ""
     optional: bool = False
 
+    @model_validator(mode="after")
+    def normalize_quantities(self):
+        self.quantity, self.quantity_max = normalize_quantity_fields(
+            self.quantity, self.quantity_max
+        )
+        return self
+
+
 class ParsedIngredientGroup(StrictSchema):
     name: str = Field(min_length=1, pattern=r".*\S.*")
     ingredients: list[ParsedIngredient]
@@ -65,6 +73,17 @@ class ParseOutput(StrictSchema):
 
 def source_hash(source_text: str) -> str:
     return sha256(source_text.encode("utf-8")).hexdigest()
+
+
+_QUANTITY_INSTRUCTIONS = (
+    "For ingredient amounts only, use plain base-10 decimal notation in quantity and "
+    "quantity_max and in newly organized ingredient lines; never use Unicode or slash "
+    "fractions in those structured amounts. Examples: ⅗ → 0.6, 1½ → 1.5, and "
+    "1/3 → 0.33333333333333333. Retain sufficient digits for repeating fractions. Put "
+    "range endpoints in quantity and quantity_max and include the same full range in "
+    "original_text. Never invent a missing amount. This rule does not alter temperatures, "
+    "times, descriptions, or verbatim source text."
+)
 
 
 parser_agent = Agent(
@@ -98,7 +117,8 @@ parser_agent = Agent(
         "name inferred from its role, using 'Ingredients' for a single or otherwise generic group. "
         "Preserve useful subgroup distinctions and group order when it is meaningful. Explicitly "
         "empty strings, nulls, and lists represent absent sections. Do not return IDs, hashes, "
-        "offsets, line numbers, source-coverage metadata, or fields not defined by the output schema."
+        "offsets, line numbers, source-coverage metadata, or fields not defined by the output schema. "
+        + _QUANTITY_INSTRUCTIONS
     ),
     capabilities=[Thinking(effort="low")],
 )
@@ -290,7 +310,8 @@ ingredient_line_agent = Agent(
         "conventional quantity-first order and provide quantity, optional upper quantity, unit, name, "
         "preparation, and optional flag in their dedicated fields. Use null or an empty string when "
         "the source omits a value. Correct obvious formatting mistakes, but never invent ingredient "
-        "facts. Return the structured ingredient even when the input is ambiguous."
+        "facts. Return the structured ingredient even when the input is ambiguous. "
+        + _QUANTITY_INSTRUCTIONS
     ),
 )
 

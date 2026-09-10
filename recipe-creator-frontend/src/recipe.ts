@@ -1,15 +1,109 @@
 import type { Ingredient, RecipeDraft, ParseResult } from './types';
 export function blank(mode: RecipeDraft['mode'] = 'text'): RecipeDraft { return { title: '', source_text: '', mode, description: '', ingredient_groups: [], directions: '', notes: '', tags: [], yield_amount: null, yield_unit: '', source_url: '', modifications: '' }; }
 export function ingredient(): Ingredient { return { id: crypto.randomUUID(), original_text: '', quantity: null, quantity_max: null, unit: '', name: '', preparation: '', optional: false, grams: null }; }
-const fractions: Record<string, string> = { '½':'1/2','¼':'1/4','¾':'3/4','⅓':'1/3','⅔':'2/3','⅛':'1/8','⅜':'3/8','⅝':'5/8','⅞':'7/8' };
+const fractions: Record<string, string> = {
+  '¼': '1/4', '½': '1/2', '¾': '3/4', '⅐': '1/7', '⅑': '1/9',
+  '⅒': '1/10', '⅓': '1/3', '⅔': '2/3', '⅕': '1/5', '⅖': '2/5',
+  '⅗': '3/5', '⅘': '4/5', '⅙': '1/6', '⅚': '5/6', '⅛': '1/8',
+  '⅜': '3/8', '⅝': '5/8', '⅞': '7/8',
+};
+const fractionGlyphPattern = /[¼½¾⅐⅑⅒⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞]/g;
 export function quantity(value: string | null | undefined): number | null {
   if (!value) return null;
-  let text = value.trim().replace(/(\d)([½¼¾⅓⅔⅛⅜⅝⅞])/g, '$1 $2').replace(/[½¼¾⅓⅔⅛⅜⅝⅞]/g, ch => fractions[ch]);
-  if (/^\d+(?:\.\d+)?$/.test(text)) return Number(text);
-  const m = /^(?:(\d+)\s+)?(\d+)\/(\d+)$/.exec(text);
-  return m && Number(m[3]) !== 0 ? Number(m[1] || 0) + Number(m[2]) / Number(m[3]) : null;
+  const text = value.trim()
+    .replace('⁄', '/')
+    .replace(/(\d)([¼½¾⅐⅑⅒⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞])/g, '$1 $2')
+    .replace(fractionGlyphPattern, glyph => fractions[glyph])
+    .replace(/\s*\/\s*/g, '/');
+  let result: number | null = null;
+  if (/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(text)) result = Number(text);
+  const match = /^(?:(\d+)\s+)?(\d+)\/(\d+)$/.exec(text);
+  if (match && Number(match[3]) !== 0) {
+    result = Number(match[1] || 0) + Number(match[2]) / Number(match[3]);
+  }
+  return result !== null && Number.isFinite(result) ? result : null;
 }
-export function scaled(value: string | null, scale: number): string { const number = quantity(value); return number === null || !Number.isFinite(scale) || scale <= 0 ? value || '' : new Intl.NumberFormat('en', {maximumFractionDigits: 3}).format(number * scale); }
+
+type FractionPart = readonly [numerator: number, denominator: number, glyph: string];
+type UnitPolicy = {
+  display: 'fractions' | 'decimal';
+  fractions: readonly FractionPart[];
+};
+const eighthFractions: readonly FractionPart[] = [
+  [1, 8, '⅛'], [1, 4, '¼'], [1, 3, '⅓'], [3, 8, '⅜'], [1, 2, '½'],
+  [5, 8, '⅝'], [2, 3, '⅔'], [3, 4, '¾'], [7, 8, '⅞'],
+];
+const quarterThirdFractions: readonly FractionPart[] = [
+  [1, 4, '¼'], [1, 3, '⅓'], [1, 2, '½'], [2, 3, '⅔'], [3, 4, '¾'],
+];
+const quarterFractions: readonly FractionPart[] = [
+  [1, 4, '¼'], [1, 2, '½'], [3, 4, '¾'],
+];
+const unitPolicies: Record<string, UnitPolicy> = {
+  cup: {display: 'fractions', fractions: eighthFractions},
+  tbsp: {display: 'fractions', fractions: quarterThirdFractions},
+  tsp: {display: 'fractions', fractions: eighthFractions},
+  oz: {display: 'fractions', fractions: quarterFractions},
+  lb: {display: 'fractions', fractions: quarterFractions},
+  'fl oz': {display: 'fractions', fractions: quarterFractions},
+  g: {display: 'decimal', fractions: []},
+  kg: {display: 'decimal', fractions: []},
+  mg: {display: 'decimal', fractions: []},
+  ml: {display: 'decimal', fractions: []},
+  l: {display: 'decimal', fractions: []},
+};
+const unitAliases: Record<string, string> = {
+  cup: 'cup', cups: 'cup',
+  tbsp: 'tbsp', tablespoon: 'tbsp', tablespoons: 'tbsp',
+  tsp: 'tsp', teaspoon: 'tsp', teaspoons: 'tsp',
+  oz: 'oz', ounce: 'oz', ounces: 'oz',
+  lb: 'lb', lbs: 'lb', pound: 'lb', pounds: 'lb',
+  'fl oz': 'fl oz', 'fl. oz': 'fl oz',
+  'fluid ounce': 'fl oz', 'fluid ounces': 'fl oz',
+  g: 'g', kg: 'kg', mg: 'mg', ml: 'ml', l: 'l',
+};
+const decimalPolicy: UnitPolicy = {display: 'decimal', fractions: []};
+function unitPolicy(unit: string): UnitPolicy {
+  const lookup = unit.trim().replace(/\s+/g, ' ').toLowerCase().replace(/\.+$/, '');
+  return unitPolicies[unitAliases[lookup]] || decimalPolicy;
+}
+const quantityFormatter = new Intl.NumberFormat('en', {maximumFractionDigits: 3});
+export function scaled(value: string | null, scale: number): string {
+  const number = quantity(value);
+  return number === null || !Number.isFinite(scale) || scale <= 0
+    ? value || ''
+    : quantityFormatter.format(number * scale);
+}
+function formattedQuantity(value: string | null, unit: string, scale: number): string {
+  const number = quantity(value);
+  if (number === null || !Number.isFinite(scale) || scale <= 0) return scaled(value, scale);
+  const scaledNumber = number * scale;
+  const policy = unitPolicy(unit);
+  if (
+    policy.display === 'fractions'
+    && Number.isFinite(scaledNumber)
+    && Math.abs(scaledNumber) < Number.MAX_SAFE_INTEGER
+  ) {
+    if (Number.isInteger(scaledNumber)) return quantityFormatter.format(scaledNumber);
+    const whole = Math.floor(scaledNumber);
+    const fractional = scaledNumber - whole;
+    const tolerance = 4 * Number.EPSILON * Math.max(1, Math.abs(scaledNumber));
+    const match = policy.fractions.find(
+      ([numerator, denominator]) => Math.abs(fractional - numerator / denominator) <= tolerance,
+    );
+    if (match) return whole ? `${whole} ${match[2]}` : match[2];
+  }
+  return quantityFormatter.format(scaledNumber);
+}
+export function ingredientAmount(row: Ingredient, scale = 1): string {
+  const range = row.quantity_max
+    ? `–${formattedQuantity(row.quantity_max, row.unit, scale)}`
+    : '';
+  return [
+    formattedQuantity(row.quantity, row.unit, scale) + range,
+    row.unit,
+  ].filter(Boolean).join(' ');
+}
 const gramFormatter = new Intl.NumberFormat('en', {maximumFractionDigits: 1});
 function gramNumber(value: unknown): number | null {
   if ((typeof value !== 'number' && typeof value !== 'string') || quantity(String(value)) === null) return null;
@@ -37,8 +131,7 @@ export function ingredientText(row: Ingredient, scale = 1, grams = false): strin
   const weight = gramText(row, scale);
   if (grams && weight) return `${row.grams?.estimated === false ? '' : '≈ '}${weight} ${row.name || row.original_text}${row.preparation ? `, ${row.preparation}` : ''}${row.optional ? ' (optional)' : ''}`;
   if (!row.name) return row.original_text;
-  const range = row.quantity_max ? `–${scaled(row.quantity_max, scale)}` : '';
-  return [scaled(row.quantity, scale) + range, row.unit, row.name].filter(Boolean).join(' ') + (row.preparation ? `, ${row.preparation}` : '') + (row.optional ? ' (optional)' : '');
+  return [ingredientAmount(row, scale), row.name].filter(Boolean).join(' ') + (row.preparation ? `, ${row.preparation}` : '') + (row.optional ? ' (optional)' : '');
 }
 export function formatRecipe(draft: RecipeDraft): string {
   return [draft.description, draft.ingredient_groups.length ? 'Ingredients\n' + draft.ingredient_groups.map(group => [group.name && draft.ingredient_groups.length > 1 ? `=== ${group.name} ===` : '', ...group.ingredients.map(row => ingredientText(row))].filter(Boolean).join('\n')).join('\n\n') : '', draft.directions ? `Directions\n${draft.directions}` : '', draft.notes ? `Notes\n${draft.notes}` : ''].filter(Boolean).join('\n\n');

@@ -61,7 +61,58 @@ it('shows one gram amount and puts the original amount in its tooltip', async ()
   await fireEvent.click(screen.getByRole('button',{name:'Adjust ingredient scale'}));
   await fireEvent.click(screen.getByRole('button',{name:'Grams'}));
   const grams = screen.getByText('120 g'); await fireEvent.mouseEnter(grams.parentElement!);
-  expect(await screen.findByRole('tooltip')).toHaveTextContent('Original: 1 cup flour Weight: 120 g');
+  expect(await screen.findByRole('tooltip')).toHaveTextContent('As written: 1 cup flour Weight: 120 g');
+});
+it('keeps detail, fallback, scaling, and authored text consistent', async () => {
+  const quantities = {
+    ...recipe,
+    ingredient_groups:[{
+      id:'g1',
+      name:'Ingredients',
+      ingredients:[
+        {...ingredient(), id:'half', name:'flour', quantity:'0.5', unit:'cup',
+          original_text:'½ cup flour from family notes',
+          grams:{amount:60, low:null, high:null, estimated:false, basis:'fixed fixture'}},
+        {...ingredient(), id:'fifth', name:'sugar', quantity:'0.6', unit:'cup',
+          original_text:'⅗ cup sugar', grams:null},
+        {...ingredient(), id:'third', name:'salt', quantity:'0.33333333333333333',
+          unit:'tsp', original_text:'1/3 tsp salt', grams:null},
+        {...ingredient(), id:'metric', name:'yeast', quantity:'0.5', unit:'g',
+          original_text:'0.5 g yeast', grams:null},
+        {...ingredient(), id:'range', name:'oil', quantity:'0.25', quantity_max:'0.75',
+          unit:'tablespoons', original_text:'1/4–3/4 tablespoons oil', grams:null},
+        {...ingredient(), id:'legacy', name:'starch', quantity:'⅗', unit:'cup',
+          original_text:'⅗ cup starch', grams:null},
+      ],
+    }],
+  };
+  mockApi(quantities);
+  render(Detail,{recipeId:'r1',navigate:vi.fn()});
+  await screen.findByRole('heading',{name:'Soup'});
+  expect(screen.getByText('½ cup flour')).toBeInTheDocument();
+  expect(screen.getByText('0.6 cup sugar')).toBeInTheDocument();
+  expect(screen.getByText('⅓ tsp salt')).toBeInTheDocument();
+  expect(screen.getByText('0.5 g yeast')).toBeInTheDocument();
+  expect(screen.getByText('¼–¾ tablespoons oil')).toBeInTheDocument();
+  expect(screen.getByText('0.6 cup starch')).toBeInTheDocument();
+
+  await fireEvent.click(screen.getByRole('button',{name:'Adjust ingredient scale'}));
+  await fireEvent.input(screen.getByLabelText('Custom multiplier'),{target:{value:'3'}});
+  expect(screen.getByText('1 ½ cup flour')).toBeInTheDocument();
+  expect(screen.getByText('1.8 cup sugar')).toBeInTheDocument();
+  expect(screen.getByText('1 tsp salt')).toBeInTheDocument();
+  expect(screen.getByText('1.5 g yeast')).toBeInTheDocument();
+  expect(screen.getByText('¾–2 ¼ tablespoons oil')).toBeInTheDocument();
+
+  await fireEvent.click(screen.getByRole('button',{name:'Grams'}));
+  const weight = screen.getByRole('button',{name:'180 g'});
+  await fireEvent.focusIn(weight);
+  expect(await screen.findByRole('tooltip')).toHaveTextContent(
+    'As written: ½ cup flour from family notes',
+  );
+  expect(screen.getAllByRole('button',{name:'1.8 cup'})).toHaveLength(2);
+  expect(screen.getAllByRole('button',{name:'1.8 cup'})[0]).toHaveClass('unavailable');
+  expect(screen.getByText('sugar')).toBeInTheDocument();
 });
 it('flags unscalable ingredients and explains unavailable gram conversions', async () => {
   const unavailable = {...recipe,ingredient_groups:[{id:'g1',name:'Ingredients',ingredients:[
@@ -96,8 +147,8 @@ it('shows a recommended gram estimate with uncertainty and details in its toolti
   const grams = screen.getByRole('button',{name:'120 g'});
   await fireEvent.focusIn(grams);
   const tooltip = await screen.findByRole('tooltip');
-  expect(tooltip).toHaveTextContent('Original: 1 cup flour Estimate: 120 ± 10 g');
-  expect(tooltip.textContent).toContain('Original: 1 cup flour\nEstimate: 120 ± 10 g');
+  expect(tooltip).toHaveTextContent('As written: 1 cup flour Estimate: 120 ± 10 g');
+  expect(tooltip.textContent).toContain('As written: 1 cup flour\nEstimate: 120 ± 10 g');
   expect(tooltip).toHaveTextContent('Basis: Typical flour density');
   expect(tooltip).toHaveTextContent('Assumptions: Level cup');
 });

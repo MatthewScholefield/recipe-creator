@@ -8,7 +8,9 @@ from pydantic_ai.messages import ModelResponse, ThinkingPart, ToolCallPart, User
 from pydantic_ai.models.function import DeltaToolCall, DeltaThinkingPart, FunctionModel
 from pydantic_ai.models.test import TestModel
 
-from recipe_creator.ai import ParseRequest, parse_recipe, parser_agent
+from recipe_creator.ai import (
+    ParseRequest, ingredient_line_agent, parse_recipe, parser_agent,
+)
 from recipe_creator.settings import Settings
 
 
@@ -98,6 +100,77 @@ async def test_reformatted_recipe_fields_are_direct_output():
     with parser_agent.override(model=TestModel(custom_output_args=expected)):
         data = await parse_recipe(source, Settings())
     assert data == expected
+
+
+async def test_both_ingredient_output_models_normalize_quantities():
+    originals = [
+        ingredient("⅗ cup flour", "flour", quantity="⅗", unit="cup"),
+        ingredient("1½ cups milk", "milk", quantity="1½", unit="cups"),
+        ingredient(
+            "1/3–2/3 tsp salt",
+            "salt",
+            quantity="1/3–2/3",
+            quantity_max="2/3",
+            unit="tsp",
+        ),
+    ]
+    expected_amounts = [
+        ("0.6", None),
+        ("1.5", None),
+        ("0.33333333333333333", "0.66666666666666667"),
+    ]
+    recipe_output = output(ingredient_groups=[{
+        "name": "Ingredients",
+        "ingredients": originals,
+    }])
+
+    def assert_quantity_instructions(info):
+        instructions = info.instructions or ""
+        for required in (
+            "ingredient amounts only",
+            "⅗ → 0.6",
+            "1½ → 1.5",
+            "1/3 → 0.33333333333333333",
+            "quantity and quantity_max",
+            "Never invent a missing amount",
+            "does not alter temperatures",
+        ):
+            assert required in instructions
+
+    async def recipe_response(_messages, info):
+        assert_quantity_instructions(info)
+        return ModelResponse(parts=[
+            ToolCallPart(info.output_tools[0].name, recipe_output)
+        ])
+
+    with parser_agent.override(model=streaming_model(recipe_response)):
+        parsed = await parse_recipe("fraction recipe", Settings())
+    parsed_rows = parsed["ingredient_groups"][0]["ingredients"]
+    assert [(row["quantity"], row["quantity_max"]) for row in parsed_rows] == expected_amounts
+    assert [row["original_text"] for row in parsed_rows] == [
+        row["original_text"] for row in originals
+    ]
+
+    line_output = {
+        "items": [
+            {"id": str(index), **row}
+            for index, row in enumerate(originals)
+        ]
+    }
+    async def line_response(_messages, info):
+        assert_quantity_instructions(info)
+        return ModelResponse(parts=[
+            ToolCallPart(info.output_tools[0].name, line_output)
+        ])
+
+    with ingredient_line_agent.override(model=FunctionModel(line_response)):
+        result = await ingredient_line_agent.run("fraction lines")
+    assert [
+        (row.quantity, row.quantity_max) for row in result.output.items
+    ] == expected_amounts
+    assert [row.original_text for row in result.output.items] == [
+        row["original_text"] for row in originals
+    ]
 
 
 

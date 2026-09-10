@@ -2,7 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import { request, mutate, message, id } from './api';
   import { load, save, safeUrl } from './local';
-  import { gramEstimateText, gramText, ingredientText, quantity, scaled } from './recipe';
+  import { gramEstimateText, gramText, ingredientAmount, ingredientText, quantity } from './recipe';
   import type { Ingredient, Recipe } from './types';
   import Photos from './Photos.svelte';
   import Button from './ui/Button.svelte';
@@ -55,7 +55,7 @@
   }
 
   function gramExplanation(row: Ingredient) {
-    const details = [`Original: ${row.original_text || ingredientText(row)}`];
+    const details = [`As written: ${row.original_text || ingredientText(row)}`];
     const estimate = gramEstimateText(row, factor);
     if (estimate) details.push(`${row.grams?.estimated === false ? 'Weight' : 'Estimate'}: ${estimate}`);
     const basis = typeof row.grams?.basis === 'string' ? row.grams.basis.trim() : '';
@@ -77,8 +77,7 @@
   function hasGramWeight(row: Ingredient) { return gramText(row) !== null; }
   function originalAmount(row: Ingredient) {
     if (!row.name) return '';
-    const range = row.quantity_max ? `–${scaled(row.quantity_max, factor)}` : '';
-    return [scaled(row.quantity, factor) + range, row.unit].filter(Boolean).join(' ');
+    return ingredientAmount(row, factor);
   }
   function ingredientTail(row: Ingredient) {
     return `${row.name}${row.preparation ? `, ${row.preparation}` : ''}${row.optional ? ' (optional)' : ''}`;

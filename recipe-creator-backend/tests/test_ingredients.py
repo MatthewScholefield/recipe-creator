@@ -5,7 +5,7 @@ import pytest
 from recipe_creator.ingredients import (
     convert_to_grams, enrich_ingredient, enrich_ingredient_groups,
     format_ingredient, format_recipe, gram_estimation_basis, ingredient_hash,
-    invalidate_estimates, parse_quantity,
+    invalidate_estimates, normalize_quantity_fields, parse_quantity,
 )
 
 
@@ -18,6 +18,36 @@ from recipe_creator.ingredients import (
 ])
 def test_quantities(value, expected):
     assert parse_quantity(value) == expected
+
+
+@pytest.mark.parametrize("fields,expected", [
+    (("⅗", None), ("0.6", None)),
+    (("1½", None), ("1.5", None)),
+    (("2 1/4", None), ("2.25", None)),
+    (("1/3", None), ("0.33333333333333333", None)),
+    (("1 / 2–3⁄4", None), ("0.5", "0.75")),
+    (("1/2–3/4", "3/4"), ("0.5", "0.75")),
+    (("1.230000000000000000", None), ("1.23", None)),
+    (("0", None), ("0", None)),
+])
+def test_structured_quantities_normalize_to_plain_decimals(fields, expected):
+    assert normalize_quantity_fields(*fields) == expected
+    assert normalize_quantity_fields(*expected) == expected
+
+
+@pytest.mark.parametrize("fields", [
+    (None, None),
+    ("about 2", None),
+    ("-1", None),
+    ("1/0", None),
+    ("nan", None),
+    ("3-2", None),
+    ("1/2–3/4", "1"),
+    ("2", "1"),
+    ("9" * 65, None),
+])
+def test_structured_quantity_normalization_does_not_guess(fields):
+    assert normalize_quantity_fields(*fields) == fields
 
 
 def test_mass_only_conversion_and_range():
