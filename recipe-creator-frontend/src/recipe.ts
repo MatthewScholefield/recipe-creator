@@ -10,9 +10,20 @@ export function quantity(value: string | null | undefined): number | null {
   return m && Number(m[3]) !== 0 ? Number(m[1] || 0) + Number(m[2]) / Number(m[3]) : null;
 }
 export function scaled(value: string | null, scale: number): string { const number = quantity(value); return number === null || !Number.isFinite(scale) || scale <= 0 ? value || '' : new Intl.NumberFormat('en', {maximumFractionDigits: 3}).format(number * scale); }
+function gramNumber(value: unknown): number | null {
+  if ((typeof value !== 'number' && typeof value !== 'string') || quantity(String(value)) === null) return null;
+  return Number(value);
+}
+export function gramText(row: Ingredient, scale = 1): string | null {
+  const amount = gramNumber(row.grams?.amount);
+  if (amount !== null) return `${scaled(String(amount), scale)} g`;
+  const low = gramNumber(row.grams?.low), high = gramNumber(row.grams?.high);
+  if (low === null || high === null) return null;
+  return low === high ? `${scaled(String(low), scale)} g` : `${scaled(String(low), scale)}–${scaled(String(high), scale)} g`;
+}
 export function ingredientText(row: Ingredient, scale = 1, grams = false): string {
-  const amount = row.grams?.amount;
-  if (grams && amount != null && quantity(String(amount)) !== null) return `${row.grams?.estimated === false ? '' : '≈ '}${scaled(String(amount), scale)} g ${row.name || row.original_text}${row.preparation ? `, ${row.preparation}` : ''}${row.optional ? ' (optional)' : ''}`;
+  const weight = gramText(row, scale);
+  if (grams && weight) return `${row.grams?.estimated === false ? '' : '≈ '}${weight} ${row.name || row.original_text}${row.preparation ? `, ${row.preparation}` : ''}${row.optional ? ' (optional)' : ''}`;
   if (!row.name) return row.original_text;
   const range = row.quantity_max ? `–${scaled(row.quantity_max, scale)}` : '';
   return [scaled(row.quantity, scale) + range, row.unit, row.name].filter(Boolean).join(' ') + (row.preparation ? `, ${row.preparation}` : '') + (row.optional ? ' (optional)' : '');

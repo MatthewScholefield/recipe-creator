@@ -83,6 +83,21 @@ it('flags unscalable ingredients and explains unavailable gram conversions', asy
 });
 
 
+it('shows estimated gram ranges, their explanation, and the completed recalculation control', async () => {
+  const ranged = {...recipe, ingredient_groups:[{...recipe.ingredient_groups[0], ingredients:[{
+    ...recipe.ingredient_groups[0].ingredients[0],
+    grams:{amount:null,low:110,high:130,estimated:true,basis:'Typical flour density',assumptions:['Level cup']},
+  }]}]};
+  mockApi(ranged); render(Detail,{recipeId:'r1',navigate:vi.fn()}); await screen.findByRole('heading',{name:'Soup'});
+  expect(screen.getByRole('button',{name:'Recalculate weight estimates'})).toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Adjust ingredient scale'}));
+  await fireEvent.click(screen.getByRole('button',{name:'Grams'}));
+  const grams = screen.getByRole('button',{name:'110–130 g'});
+  await fireEvent.focusIn(grams);
+  expect(await screen.findByRole('tooltip')).toHaveTextContent('Basis: Typical flour density');
+  expect(screen.getByRole('tooltip')).toHaveTextContent('Assumptions: Level cup');
+});
+
 it('renders photos directly at the bottom instead of behind a photos toggle', async () => {
   mockApi(); render(Detail,{recipeId:'r1',navigate:vi.fn()}); await screen.findByRole('heading',{name:'Soup'});
   expect(screen.getByRole('heading',{name:'Photos'})).toBeInTheDocument();

@@ -2,7 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import { request, mutate, message, id } from './api';
   import { load, save, safeUrl } from './local';
-  import { ingredientText, quantity, scaled } from './recipe';
+  import { gramText, ingredientText, quantity, scaled } from './recipe';
   import type { Ingredient, Recipe } from './types';
   import AuthorPicker from './AuthorPicker.svelte';
   import Photos from './Photos.svelte';
@@ -17,18 +17,37 @@
   let { recipeId, navigate }: { recipeId: string; navigate: (path: string) => void } = $props();
   let recipe = $state<Recipe>(), error = $state(''), status = $state(''), scale = $state(1), grams = $state(load('grams', false));
   let checked = $state<string[]>(untrack(() => load(`checked:${recipeId}`, []))), bookmarks = $state<string[]>(load('bookmarks', []));
-  let awake = $state(false), deleting = $state(false), deleteOpen = $state(false), controlsOpen = $state(false);
+  let awake = $state(false), deleting = $state(false), deleteOpen = $state(false), controlsOpen = $state(false), weightsBusy = $state(false);
   let lock: WakeLockSentinel | undefined;
   let alive = true;
   const lifetime = new AbortController();
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
-  async function fetchRecipe() { error = ''; try { const result = await request<Recipe>(`/recipes/${id(recipeId)}`, {signal: lifetime.signal}); if (alive) recipe = result; } catch(e) { if (alive) error = message(e); } }
-  onMount(() => { void fetchRecipe(); return () => { alive = false; lifetime.abort(); void lock?.release(); }; });
+  function scheduleRecipeRefresh(value: Recipe) {
+    clearTimeout(refreshTimer);
+    if (['pending', 'running', 'retry'].includes(value.enrichment_status)) {
+      refreshTimer = setTimeout(() => void fetchRecipe(), 2000);
+    }
+  }
+  async function fetchRecipe() { error = ''; try { const result = await request<Recipe>(`/recipes/${id(recipeId)}`, {signal: lifetime.signal}); if (alive) { recipe = result; scheduleRecipeRefresh(result); } } catch(e) { if (alive) error = message(e); } }
+  onMount(() => { void fetchRecipe(); return () => { alive = false; clearTimeout(refreshTimer); lifetime.abort(); void lock?.release(); }; });
   $effect(() => { save('grams', grams); save(`checked:${recipeId}`, checked); save('bookmarks', bookmarks); });
   const factor = $derived(Number.isFinite(scale) && scale > 0 ? scale : 1);
 
   async function wake() { try { if (awake) { await lock?.release(); awake = false; } else if ('wakeLock' in navigator) { lock = await navigator.wakeLock.request('screen'); if (!alive) {await lock.release(); return;} awake = true; lock.addEventListener('release', () => awake = false); } else status = 'Keeping the screen awake is not supported by this browser.'; } catch { status = 'Could not keep the screen awake. Check your power-saving settings.'; } }
   async function share() { try { if (navigator.share) await navigator.share({title: recipe?.title, url: location.href}); else { await navigator.clipboard.writeText(location.href); status = 'Recipe link copied.'; } } catch(e) { if (!(e instanceof DOMException && e.name === 'AbortError')) status = `Copy this link: ${location.href}`; } }
+  async function recalculateWeights() {
+    weightsBusy = true; error = '';
+    try {
+      const result = await mutate<{enrichment_status?: string}>(`/recipes/${id(recipeId)}/enrich`);
+      if (recipe) recipe = {...recipe, enrichment_status: result.enrichment_status || 'pending'};
+      status = 'Weight estimates queued.';
+    } catch(e) {
+      error = message(e);
+    } finally {
+      weightsBusy = false;
+    }
+  }
   async function removeRecipe() { if (!recipe) return; deleting = true; error = ''; try { await mutate(`/recipes/${id(recipeId)}?expected_revision=${recipe.revision}`, undefined, 'DELETE', lifetime.signal); if (alive) navigate('/'); } catch(e) { if (alive) error = message(e); } finally { if (alive) { deleting = false; deleteOpen = false; } } }
   function openEditor(event: MouseEvent) {
     if (event.defaultPrevented || event.button > 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
@@ -37,9 +56,19 @@
   }
 
   function updateAuthor(result: Pick<Recipe, 'owner_id' | 'author_name' | 'revision'>) { if (recipe) recipe = {...recipe, ...result}; }
+  function gramExplanation(row: Ingredient) {
+    const details = [`As written: ${row.original_text || ingredientText(row)}`];
+    const basis = typeof row.grams?.basis === 'string' ? row.grams.basis.trim() : '';
+    if (row.grams?.estimated !== false && basis) details.push(`Basis: ${basis}`);
+    const assumptions = row.grams?.assumptions;
+    if (Array.isArray(assumptions)) {
+      const values = assumptions.filter((value): value is string => typeof value === 'string' && Boolean(value.trim()));
+      if (values.length) details.push(`Assumptions: ${values.join('; ')}`);
+    }
+    return details.join(' ');
+  }
   function scaledAmount(value: number | string) { return new Intl.NumberFormat('en', {maximumFractionDigits: 3}).format(Number(value) * factor); }
-  function hasGramAmount(row: Ingredient) { return row.grams?.amount != null && quantity(String(row.grams.amount)) !== null; }
-  function gramTail(row: Ingredient) { return `${row.name || row.original_text}${row.preparation ? `, ${row.preparation}` : ''}${row.optional ? ' (optional)' : ''}`; }
+  function hasGramWeight(row: Ingredient) { return gramText(row) !== null; }
   function originalAmount(row: Ingredient) {
     if (!row.name) return '';
     const range = row.quantity_max ? `–${scaled(row.quantity_max, factor)}` : '';
@@ -49,7 +78,7 @@
     return `${row.name}${row.preparation ? `, ${row.preparation}` : ''}${row.optional ? ' (optional)' : ''}`;
   }
   function scaleBadge(row: Ingredient) {
-    return factor !== 1 && (!grams || !hasGramAmount(row)) && (!row.name || quantity(row.quantity) === null);
+    return factor !== 1 && (!grams || !hasGramWeight(row)) && (!row.name || quantity(row.quantity) === null);
   }
 </script>
 {#if error}<p class="notice error" role="alert">{error} <button onclick={fetchRecipe}>Reload recipe</button></p>{/if}
@@ -82,10 +111,10 @@
   </div>{/if}
 </section>
 <div class="recipe-columns">
-<section><h2 class="sr-only">Ingredients</h2>{#each recipe.ingredient_groups as group}<section class="ingredients">{#if group.name && recipe.ingredient_groups.length > 1}<h3>{group.name}</h3>{/if}{#each group.ingredients as row}<div class:checked={checked.includes(row.id)}><label class="ingredient"><input type="checkbox" checked={checked.includes(row.id)} onchange={() => checked = checked.includes(row.id) ? checked.filter(value => value !== row.id) : [...checked, row.id]}>
+<section><h2 class="sr-only">Ingredients</h2>{#each recipe.ingredient_groups as group}<section class="ingredients">{#if group.name && recipe.ingredient_groups.length > 1}<h3>{group.name}</h3>{/if}{#each group.ingredients as row}{@const weight = gramText(row,factor)}<div class:checked={checked.includes(row.id)}><label class="ingredient"><input type="checkbox" checked={checked.includes(row.id)} onchange={() => checked = checked.includes(row.id) ? checked.filter(value => value !== row.id) : [...checked, row.id]}>
   {#if scaleBadge(row)}<span class="scale-badge">{scaledAmount(1)}×</span>{/if}
-  {#if grams && hasGramAmount(row)}
-    <span>{row.grams?.estimated === false ? '' : '≈ '}<Tooltip text={`As written: ${row.original_text || ingredientText(row)}`}><button type="button" class="gram-amount">{scaledAmount(row.grams!.amount!)} g</button></Tooltip>{' '}{gramTail(row)}</span>
+  {#if grams && weight}
+    <span>{row.grams?.estimated === false ? '' : '≈ '}<Tooltip text={gramExplanation(row)}><button type="button" class="gram-amount">{weight}</button></Tooltip>{' '}{ingredientTail(row) || row.original_text}</span>
   {:else if grams}
     <span><Tooltip text="No gram conversion is available. This amount remains in the original units."><button type="button" class="gram-amount unavailable">{originalAmount(row) || ingredientText(row,factor)}</button></Tooltip>{#if originalAmount(row)}{' '}{ingredientTail(row)}{/if}</span>
   {:else}
@@ -96,7 +125,7 @@
 </div>
 {#if recipe.notes}<section><h2>Notes</h2><div class="prose">{recipe.notes}</div></section>{/if}
 {/if}
-{#if recipe.enrichment_status && recipe.enrichment_status !== 'complete'}<p class="no-print">Ingredient weights: {recipe.enrichment_status}{#if recipe.can_edit}<button onclick={async () => {try { await mutate(`/recipes/${id(recipeId)}/enrich`); status = 'Weight estimates queued.'; } catch(e) {error = message(e);}}}>Retry weight estimates</button>{/if}</p>{/if}
+{#if recipe.enrichment_status && recipe.enrichment_status !== 'complete'}<p class="no-print">Ingredient weights: {recipe.enrichment_status}{#if recipe.can_edit} <button disabled={weightsBusy} onclick={recalculateWeights}>{weightsBusy ? 'Queueing…' : 'Retry weight estimates'}</button>{/if}</p>{:else if recipe.can_edit}<p class="no-print"><button disabled={weightsBusy} onclick={recalculateWeights}>{weightsBusy ? 'Queueing…' : 'Recalculate weight estimates'}</button></p>{/if}
 <section class="photos no-print"><h2>Photos</h2><Photos {recipeId} /></section>
 </article>
 <Modal bind:open={deleteOpen} title="Delete recipe"><p>This recipe will no longer appear in the collection.</p><div class="dialog-actions"><Button variant="ghost" onclick={() => deleteOpen = false}>Cancel</Button><Button variant="danger" disabled={deleting} onclick={removeRecipe}>{#if deleting}<Spinner label="Deleting recipe" size={16} />Deleting…{:else}Delete recipe{/if}</Button></div></Modal>

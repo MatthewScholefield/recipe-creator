@@ -154,10 +154,15 @@ def invalidate_estimates(ingredient: dict) -> dict:
 
 
 def _mass_from_text(text: str):
-    # Only an amount followed by an explicit mass unit is convertible. No density guesses.
     units = "|".join(sorted(_MASS, key=len, reverse=True))
     match = re.match(rf"^\s*(.+?)\s*({units})\.?(?=\s|$)", text, re.IGNORECASE)
     return convert_to_grams(match[1], match[2]) if match else None
+
+
+def _parenthetical_mass(text: str):
+    units = "|".join(sorted(_MASS, key=len, reverse=True))
+    matches = re.findall(rf"\(\s*(.+?)\s*({units})\.?\s*\)", text, re.IGNORECASE)
+    return convert_to_grams(*matches[0]) if len(matches) == 1 else None
 
 
 def enrich_ingredient(ingredient: dict) -> dict:
@@ -168,10 +173,15 @@ def enrich_ingredient(ingredient: dict) -> dict:
         result.setdefault("grams_input_hash", ingredient_hash(result))
         return result
     text = format_ingredient(result)
-    if _AMBIGUOUS.search(text) or re.search(r"[()]|(?<=[A-Za-z])\s*/\s*(?=[A-Za-z])", text):
+    embedded_grams = _parenthetical_mass(text) if result.get("text") else None
+    if embedded_grams is None and (
+        _AMBIGUOUS.search(text) or re.search(r"[()]|(?<=[A-Za-z])\s*/\s*(?=[A-Za-z])", text)
+    ):
         return result
-    grams = (_mass_from_text(result["text"]) if result.get("text")
-             else convert_to_grams(result.get("quantity"), result.get("unit")))
+    if result.get("text"):
+        grams = embedded_grams or _mass_from_text(result["text"])
+    else:
+        grams = convert_to_grams(result.get("quantity"), result.get("unit"))
     if grams is not None:
         for key in _DERIVED:
             result.pop(key, None)

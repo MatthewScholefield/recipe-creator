@@ -44,6 +44,18 @@ def test_original_text_never_rewritten_and_estimates_invalidated():
     assert "grams" not in invalidate_estimates({**result, "name": "sugar"})
 
 
+@pytest.mark.parametrize(("text", "expected"), [
+    ("2 ¾ cups (385 g) gluten free flour", 385),
+    ("1 ⅜ cups (11 ounces) warm water", 11 * 28.349523125),
+    ("⅗ cup (72 g) tapioca starch/flour", 72),
+])
+def test_explicit_parenthetical_mass_is_authoritative(text, expected):
+    result = enrich_ingredient({"text": text})
+    assert result["grams"] == pytest.approx(expected)
+    assert result["grams_range"] == pytest.approx([expected, expected])
+    assert result["grams_estimate"] is False
+
+
 def test_ranges_are_not_silently_averaged():
     result = enrich_ingredient({"text": "1–2 oz butter"})
     assert result["grams"] is None
@@ -93,7 +105,7 @@ def test_estimation_basis_normalizes_quantity_independent_cache_identity():
 
 
 @pytest.mark.parametrize("text", ["salt to taste", "1 package sugar", "1 can tomatoes",
-    "1 cup flour or sugar", "1 cup", "100 g flour or 200 g sugar", "1 cup flour (200 g)",
+    "1 cup flour or sugar", "1 cup", "100 g flour or 200 g sugar",
     "100 g flour/sugar", "100 g salt as needed", "2–1 cups flour", "a few eggs"])
 def test_ambiguous_inputs_never_get_estimates(text):
     from recipe_creator.ingredients import estimation_eligible
