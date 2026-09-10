@@ -88,7 +88,6 @@
     if (!recovered) return;
     draft = copy(recovered.draft); revision = recovered.revision; publishKey = recovered.key;
     undo = recovered.undo ? copy(recovered.undo) : undefined; undoLines = {}; dirty = copy(recovered.ingredientLines || {}); recovered = null;
-    notice = 'Recovered local draft. Saving checks its original revision.';
   }
   function discardRecoveredDraft() {
     if (!recipeId || !recovered) return;
