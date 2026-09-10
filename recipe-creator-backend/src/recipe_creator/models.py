@@ -38,6 +38,14 @@ class DomainModel(BaseSurrealModel):
     updated_at: datetime = Field(default_factory=utcnow)
     payload: dict[str, Any] = Field(default_factory=dict, json_schema_extra={"flexible": True})
 
+    def _update_from_db(self, record: dict[str, Any]) -> None:
+        aliases = {
+            field.alias: name
+            for name, field in self.__class__.model_fields.items()
+            if isinstance(field.alias, str)
+        }
+        super()._update_from_db({aliases.get(key, key): value for key, value in record.items()})
+
 
 class User(DomainModel):
     model_config = SurrealConfigDict(table_name="users")

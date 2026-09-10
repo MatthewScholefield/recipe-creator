@@ -248,9 +248,22 @@ class Repository:
         model = self._model(table)
         if "id" in data:
             raise ValueError("Pass id separately; IDs are immutable")
-        result = {key: value for key, value in data.items() if key in model.model_fields}
+        field_names = {
+            alias: name
+            for name, field in model.model_fields.items()
+            if isinstance(alias := field.alias, str)
+        }
+        result = {
+            field_names.get(key, key): value
+            for key, value in data.items()
+            if key in model.model_fields or key in field_names
+        }
         payload = dict(result.get("payload", {}))
-        payload.update({key: value for key, value in data.items() if key not in model.model_fields})
+        payload.update({
+            key: value
+            for key, value in data.items()
+            if key not in model.model_fields and key not in field_names
+        })
         result["payload"] = payload
         for name, target in model.get_foreign_key_targets().items():
             if result.get(name) is not None and target:

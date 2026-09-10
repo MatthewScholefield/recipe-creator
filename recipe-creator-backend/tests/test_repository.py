@@ -80,6 +80,8 @@ async def test_all_tables_and_dedupe(repo):
         data = {'copy': DEFAULT_SITE_COPY} if table == 'site_settings' else {}
         row = await repo.create(table, {**data, "service_nested": {"null": None, "values": [None, {"ok": True}]}})
         assert (await repo.get(table, row["id"]))["service_nested"] == {"null": None, "values": [None, {"ok": True}]}
+        if table == 'site_settings':
+            assert row['copy'] == DEFAULT_SITE_COPY
     with pytest.raises(NotFoundError):
         await repo.create("devices", {"user_id": "missing"})
     await repo.create("jobs", {"dedupe_key": "one"})
