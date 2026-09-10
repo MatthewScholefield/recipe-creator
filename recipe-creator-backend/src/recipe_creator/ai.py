@@ -176,8 +176,8 @@ class GramEstimateBatchRequest(StrictSchema):
 
 class GramBasisOutput(StrictSchema):
     cache_key: str = Field(pattern=r"^[0-9a-f]{64}$")
-    grams_per_unit_low: float | None = Field(default=None, ge=0, allow_inf_nan=False)
-    grams_per_unit_high: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    grams_per_unit_low: float | None = Field(ge=0, allow_inf_nan=False)
+    grams_per_unit_high: float | None = Field(ge=0, allow_inf_nan=False)
     basis: str = Field(min_length=1, max_length=1000)
     assumptions: list[str] = Field(min_length=1, max_length=8)
     refusal_reason: str | None = Field(default=None, max_length=500)

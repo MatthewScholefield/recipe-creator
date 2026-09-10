@@ -334,6 +334,26 @@ def test_invalid_estimates_are_rejected(change):
         validate_gram_estimates(request, output)
 
 
+@pytest.mark.parametrize("missing", ["grams_per_unit_low", "grams_per_unit_high"])
+def test_estimate_bounds_are_required(missing):
+    from recipe_creator.ai import GramEstimateBatchOutput
+    from recipe_creator.ingredients import REGIONAL_ASSUMPTION
+
+    item = {
+        "cache_key": "a" * 64,
+        "grams_per_unit_low": 110,
+        "grams_per_unit_high": 130,
+        "basis": "Flour density",
+        "assumptions": ["Level cup"],
+    }
+    item.pop(missing)
+    with pytest.raises(ValidationError):
+        GramEstimateBatchOutput.model_validate({
+            "regional_assumption": REGIONAL_ASSUMPTION,
+            "items": [item],
+        })
+
+
 async def test_estimator_refusal():
     from recipe_creator.ai import estimate_gram_bases, estimator_agent
     from recipe_creator.ingredients import REGIONAL_ASSUMPTION
