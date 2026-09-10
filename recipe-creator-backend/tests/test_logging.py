@@ -41,6 +41,24 @@ def test_configure_logging_intercepts_stdlib_records(log_output):
     assert "stdlib integration works" in log_output.getvalue()
 
 
+def test_configure_logging_uses_colored_single_line_default(monkeypatch):
+    class Terminal(StringIO):
+        def isatty(self):
+            return True
+
+    output = Terminal()
+    monkeypatch.setattr("recipe_creator.logging._CONFIGURED", False)
+    monkeypatch.setattr("recipe_creator.logging.sys.stderr", output)
+    configure_logging()
+    logly_logger.info("first message")
+    logly_logger.warning("second message")
+
+    rendered = output.getvalue()
+    assert "\x1b[" in rendered
+    assert [line for line in rendered.splitlines() if line] == rendered.splitlines()
+    assert len(rendered.splitlines()) == 2
+
+
 async def test_logly_middleware_serves_session_through_asgi_stack(log_output):
     application = app.create_app(run_jobs=False)
     # ASGITransport does not run lifespan; anonymous sessions need no database.
@@ -103,10 +121,10 @@ async def test_logly_middleware_logs_unexpected_failure_with_traceback(monkeypat
 def test_server_keeps_uvicorn_logging_integration(monkeypatch):
     calls = []
     monkeypatch.setattr("sys.argv", ["recipe-creator-server"])
-    monkeypatch.setattr(server, "setup_uvicorn_logging", lambda: calls.append("logging"))
+    monkeypatch.setattr(server, "setup_uvicorn_logging", lambda **kwargs: calls.append(("logging", kwargs)))
     monkeypatch.setattr(server.uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
     server.main()
-    assert calls[0] == "logging"
+    assert calls[0] == ("logging", {"format": None})
     args, kwargs = calls[1]
     assert args == ("recipe_creator.app:create_app",)
     assert kwargs["factory"] is True

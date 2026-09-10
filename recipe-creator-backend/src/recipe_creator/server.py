@@ -19,7 +19,8 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = parser().parse_args()
-    setup_uvicorn_logging()
+    # None tells the integration to use Logly's native colored console format.
+    setup_uvicorn_logging(format=None)
     uvicorn.run("recipe_creator.app:create_app", factory=True, host=args.host, port=args.port,
                 reload=args.reload, reload_dirs=args.reload_dirs, proxy_headers=args.proxy_headers,
                 log_config=None)

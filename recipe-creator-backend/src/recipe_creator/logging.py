@@ -8,7 +8,10 @@ from logly.integrations.stdlib import InterceptHandler
 
 
 _CONFIGURED = False
-_LOG_FORMAT = "{time:%Y-%m-%d %H:%M:%S} | {level: <8} | {filename}:{function}:{line} - {message}\n{exception}"
+
+
+def _has_exception(record) -> bool:
+    return record["exception"] is not None
 
 
 async def logly_dispatch(request, call_next):
@@ -25,5 +28,12 @@ def configure_logging(*, sink=None) -> None:
     global _CONFIGURED
     logging.basicConfig(handlers=[InterceptHandler()], level=logging.INFO, format="", force=True)
     if not _CONFIGURED or sink is not None:
-        logger.configure(handlers=[{"sink": sys.stderr if sink is None else sink, "level": "DEBUG", "format": _LOG_FORMAT}])
+        target = sys.stderr if sink is None else sink
+        logger.configure(handlers=[
+            # No format override: keep Logly's colored, single-line default.
+            {"sink": target, "level": "DEBUG"},
+            # Logly 0.2.2's default omits tracebacks. Add only the traceback;
+            # putting {exception} in the main format creates a blank line.
+            {"sink": target, "level": "DEBUG", "format": "{exception}", "filter": _has_exception},
+        ])
         _CONFIGURED = True
