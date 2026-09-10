@@ -39,10 +39,28 @@ it('does not navigate after a publishing editor is unmounted', async () => {
   expect(listDrafts().map(draft => draft.id)).toEqual([local.id]);
   expect(fetcher.mock.calls.filter(([url]) => url === '/api/recipes')).toHaveLength(1);
 });
-it('recovers exact draft text and original revision before editing', async () => {
-  localStorage.setItem('notebook:draft:r1',JSON.stringify({draft:{...blank(),title:'Recovered soup',source_text:'  exact draft\n\n'},revision:1,key:'retry-key',saved:new Date().toISOString()}));
+it('shows a recovered edit as a card and removes it after submission', async () => {
+  localStorage.setItem('notebook:draft:r1',JSON.stringify({draft:{...blank(),title:'Recovered soup',source_text:'  exact draft\n\n'},revision:1,key:'retry-key',saved:new Date(Date.now() - 24 * 60 * 1000).toISOString()}));
   const fetcher = mockApi((url,init) => url === '/api/session' ? identity : recipe);
-  render(Editor,{recipeId:'r1',navigate:vi.fn()}); await fireEvent.click(await screen.findByRole('button',{name:'Recover draft'})); expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue('  exact draft\n\n'); await fireEvent.click(screen.getByRole('button',{name:'Save changes'})); await waitFor(() => expect(fetcher.mock.calls.some(([,init]) => init?.method === 'PUT')).toBe(true)); const write = fetcher.mock.calls.find(([,init]) => init?.method === 'PUT'); expect(JSON.parse(write![1]!.body as string).expected_revision).toBe(1);
+  render(Editor,{recipeId:'r1',navigate:vi.fn()});
+  expect(await screen.findByRole('heading',{name:'Restore draft?'})).toBeInTheDocument();
+  expect(screen.getByText('You edited')).toBeInTheDocument();
+  expect(screen.queryByLabelText('Recipe title')).not.toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Edit draft'}));
+  expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue('  exact draft\n\n');
+  await fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+  await waitFor(() => expect(fetcher.mock.calls.some(([,init]) => init?.method === 'PUT')).toBe(true));
+  await waitFor(() => expect(localStorage.getItem('notebook:draft:r1')).toBeNull());
+});
+it('discards a recovered edit without leaving the form disabled', async () => {
+  localStorage.setItem('notebook:draft:r1',JSON.stringify({draft:{...blank(),title:'Discard me'},revision:1,key:'discard-key',saved:new Date().toISOString()}));
+  mockApi((url) => url === '/api/session' ? identity : recipe);
+  render(Editor,{recipeId:'r1',navigate:vi.fn()});
+  await screen.findByRole('heading',{name:'Restore draft?'});
+  await fireEvent.click(screen.getByRole('button',{name:'Discard draft'}));
+  expect(localStorage.getItem('notebook:draft:r1')).toBeNull();
+  expect(await screen.findByLabelText('Recipe title')).toHaveValue('Soup');
+  expect(screen.getByText('Draft discarded. You are editing the current recipe.')).toBeInTheDocument();
 });
 it('keeps text publishable during a parser outage', async () => {
   const fetcher = mockApi(url => url === '/api/session' ? identity : url === '/api/parse' ? new Response(JSON.stringify({detail:'AI unavailable'}),{status:503}) : {...recipe,id:'saved'});

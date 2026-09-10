@@ -189,7 +189,7 @@ it('requires a choice before formatting source and can undo back to exact origin
 it('retains recovered edits at their original revision on conflict', async () => {
   localStorage.setItem('notebook:draft:r1',JSON.stringify({draft:{...blank(),title:'Recovered',source_text:' exact\n'},revision:1,key:'key',saved:new Date().toISOString()}));
   const fetcher = mockApi((url, init) => init?.method === 'PUT' ? new Response(JSON.stringify({detail:'Newer revision'}),{status:409}) : recipe);
-  const navigate = vi.fn(), view = render(Editor,{recipeId:'r1',navigate}); await fireEvent.click(await screen.findByRole('button',{name:'Recover draft'}));
+  const navigate = vi.fn(), view = render(Editor,{recipeId:'r1',navigate}); await fireEvent.click(await screen.findByRole('button',{name:'Edit draft'}));
   await fireEvent.click(screen.getByRole('button',{name:'Save changes'})); expect(await screen.findByRole('heading',{name:'A newer version exists'})).toBeInTheDocument();
   const write = fetcher.mock.calls.find(([,init]) => init?.method === 'PUT')!; expect(JSON.parse(write[1]!.body as string).expected_revision).toBe(1);
   view.unmount(); expect(JSON.parse(localStorage.getItem('notebook:draft:r1')!).draft.source_text).toBe(' exact\n'); expect(navigate).not.toHaveBeenCalled();

@@ -78,6 +78,10 @@ export function deleteDraft(id: string): boolean {
   if (!validId(id)) return false;
   try { localStorage.removeItem(prefix + id); notify(); return true; } catch { return false; }
 }
+export function deleteLegacyDraft(recipeId?: string): boolean {
+  const key = recipeId ? `notebook:draft:${recipeId}` : legacyKey;
+  try { localStorage.removeItem(key); notify(); return localStorage.getItem(key) === null; } catch { return false; }
+}
 export function draftHref(id: string): string { return `/new?draft=${encodeURIComponent(id)}`; }
 export function subscribeDrafts(listener: () => void): () => void {
   const storage = (event: StorageEvent) => { if (event.key === null || event.key.startsWith(prefix) || event.key === legacyKey) listener(); };

@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
   import { ApiError, request, mutate, message, id } from './api';
-  import { save, remove, safeUrl } from './local';
+  import { save, safeUrl } from './local';
   import { appState, refreshIdentity } from './app-state.svelte';
   import { blank, ingredient, formatRecipe, applyParse, ParseGuard, move, ingredientLine, changedIngredient,
     dirtyIngredientLines, applyIngredientLines, withoutEmptyIngredients, normalizeTags, tagError, MEAL_CLASSIFIERS } from './recipe';
-  import { createDraft, saveDraft, readDraft, listDrafts, deleteDraft, draftHref, subscribeDrafts,
+  import { createDraft, saveDraft, readDraft, listDrafts, deleteDraft, deleteLegacyDraft, draftHref, subscribeDrafts,
     migrateLegacyDraft, readLegacyDraft, recoverLegacyDraft, type LocalDraft, type LegacyDraft, type DraftSummary } from './drafts';
   import IdentityPrompt from './IdentityPrompt.svelte';
   import AuthorPicker from './AuthorPicker.svelte';
@@ -13,6 +13,7 @@
   import Tooltip from './ui/Tooltip.svelte';
   import Spinner from './ui/Spinner.svelte';
   import Icon from './ui/Icon.svelte';
+  import PhotoDate from './PhotoDate.svelte';
   import Button from './ui/Button.svelte';
   import BackLink from './ui/BackLink.svelte';
   import type { Recipe, RecipeDraft, ParseResult, IngredientGroup, IngredientLinesResult, TagCatalog } from './types';
@@ -88,6 +89,11 @@
     draft = copy(recovered.draft); revision = recovered.revision; publishKey = recovered.key;
     undo = recovered.undo ? copy(recovered.undo) : undefined; undoLines = {}; dirty = copy(recovered.ingredientLines || {}); recovered = null;
     notice = 'Recovered local draft. Saving checks its original revision.';
+  }
+  function discardRecoveredDraft() {
+    if (!recipeId || !recovered) return;
+    if (!deleteLegacyDraft(recipeId)) { error = 'Could not discard this draft. Please try again.'; return; }
+    recovered = null; baseline = JSON.stringify(draft); notice = 'Draft discarded. You are editing the current recipe.';
   }
   async function fetchTags() {
     try { const catalog = await request<TagCatalog>('/tags', {signal: lifetime.signal}); if (alive) { tags = normalizeTags([...MEAL_CLASSIFIERS, ...catalog.tags]); tagsError = ''; } }
@@ -204,7 +210,8 @@
       const result = await mutate<Recipe>(recipeId ? `/recipes/${id(recipeId)}` : '/recipes', {...payload, ...(recipeId ? {expected_revision: revision} : {})}, recipeId ? 'PUT' : 'POST', signal, recipeId ? undefined : publishKey);
       if (!alive || !guard.accepts(version)) return;
       baseline = JSON.stringify(draft); ready = false;
-      if (activeId) deleteDraft(activeId); else remove(storageKey);
+      const removed = activeId ? deleteDraft(activeId) : deleteLegacyDraft(recipeId);
+      if (!removed) { error = 'Recipe saved, but its local draft could not be removed.'; ready = true; return; }
       navigate(`/recipes/${id(result.id)}`);
     } catch (e) {
       if (alive && guard.accepts(version)) {
@@ -240,12 +247,18 @@
       {#if legacyAvailable}<p>An older draft also needs recovery. Your other drafts are unchanged.</p><button onclick={recoverOldNew}>Recover older draft as new</button>{/if}
     </section>
   {:else}
+    {#if recovered}
+      <section class="draft-recovery card draft" aria-labelledby="restore-draft-heading">
+        <h2 id="restore-draft-heading">Restore draft?</h2>
+        <PhotoDate createdAt={recovered.saved} label="You edited" />
+        <div class="toolbar"><Button variant="primary" onclick={restoreEdit}><Icon name="edit" size={16} />Edit draft</Button><Button variant="danger" onclick={discardRecoveredDraft}><Icon name="trash" size={16} />Discard draft</Button></div>
+      </section>
+    {:else}
     {#if external}<section class="notice" role="alert"><h2>Changed in another tab</h2><p>Autosave is paused. Keep your copy as a new draft, or reload the stored version.</p><button onclick={reloadLocal}>Reload draft</button><button onclick={fork}>Save as new draft</button></section>{/if}
     {#if activeId}<div class="toolbar draft-actions"><span class="draft-badge">Draft · {draftName}</span><button type="button" class="ghost" disabled={busy || external} onclick={() => naming = !naming}><Icon name="edit" size={16} />Rename</button><button type="button" class="ghost" disabled={busy} onclick={() => discard = !discard}><Icon name="trash" size={16} />Discard</button><Button variant="ghost" size="sm" href="/new"><Icon name="plus" size={16} />Start another recipe</Button></div>
       {#if naming}<label>Draft name<input maxlength="120" bind:value={draftName} disabled={busy || external}></label><button onclick={() => { draftName = draftName.trim() || 'Untitled recipe'; flush(); naming = false; }}>Done</button>{/if}
       {#if discard}<section class="notice"><p>Discard “{draftName}” from this device?</p><button onclick={discardDraft}>Discard draft</button><button onclick={() => discard = false}>Keep draft</button></section>{/if}
     {/if}
-    {#if recovered}<section class="notice"><h2>A saved edit is waiting</h2><p>Saved {new Date(recovered.saved).toLocaleString()}.</p><button onclick={restoreEdit}>Recover draft</button><button onclick={() => { recovered = null; remove(storageKey); }}>Use server version</button></section>{/if}
     <form onsubmit={(event) => {event.preventDefault(); void publish();}} oninput={changed}>
       <fieldset disabled={busy || !!recovered}>
         <label>Recipe title<input required maxlength="300" bind:value={draft.title}></label>
@@ -289,20 +302,20 @@
       {#if recipeId && editorRecipe}
         <AuthorPicker recipe={editorRecipe} onchanged={(result) => {editorRecipe = {...editorRecipe!, ...result}; revision = result.revision; notice = `Author changed to ${result.author_name || 'Unknown author'}.`;}} />
       {/if}
+      <p class="help" role="status">{persisted}</p>
       {#if parsing}<div class="toolbar"><Spinner label="Organizing…" /><button type="button" onclick={cancelParse}>Cancel organizing</button></div>{/if}
       {#if busy}<div class="toolbar"><Spinner label="Saving recipe…" /><button type="button" onclick={() => {cancelWork(); notice = 'Save cancelled. Your draft is retained; retry uses the same publishing key.';}}>Cancel saving</button></div>{/if}
       {#if notice}<p role="status" class="notice">{notice}</p>{/if}
-      <p class="help" role="status">{persisted}</p>
       {#if !hasIdentity}<IdentityPrompt onready={(value) => {appState.identity = value; notice = 'Name set. Review your recipe, then publish.';}} />{/if}
       <p class="help" id={helpId}>{submitHelp}</p>
       <!-- The focusable group exposes help for the disabled child button. -->
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <Tooltip text={submitHelp}><span class="submit-wrapper" role="group" tabindex={submitDisabled ? 0 : -1} aria-label={submitHelp} aria-describedby={helpId}><button class="primary" type="submit" disabled={submitDisabled} aria-describedby={helpId}>{recipeId ? 'Save changes' : 'Publish recipe'}</button></span></Tooltip>
     </form>
+    {/if}
   {/if}
 {/if}
-
 <style>
-  .line-row{display:flex;align-items:center;gap:.25rem;margin:.4rem 0}.line-row label{flex:1;margin:0;min-width:0}.line-row input{width:100%}.ghost{display:inline-flex;align-items:center;gap:.3rem;background:transparent;border-color:transparent;padding:.35rem .5rem;font-size:.9rem}.toolbar{flex-wrap:wrap}.draft-actions{margin-bottom:1rem}.draft-badge{font-size:.85rem;color:var(--muted)}.draft-list{list-style:none;padding:0}.draft-list li{display:flex;justify-content:space-between;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--border)}.draft-list small{display:block}.submit-wrapper{display:inline-flex}.submit-wrapper:focus-visible{outline:2px solid currentColor;outline-offset:4px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  .line-row{display:flex;align-items:center;gap:.25rem;margin:.4rem 0}.line-row label{flex:1;margin:0;min-width:0}.line-row input{width:100%}.ghost{display:inline-flex;align-items:center;gap:.3rem;background:transparent;border-color:transparent;padding:.35rem .5rem;font-size:.9rem}.toolbar{flex-wrap:wrap}.draft-actions{margin-bottom:1rem}.draft-badge{font-size:.85rem;color:var(--muted)}.draft-recovery{border-style:dashed;max-width:32rem}.draft-list{list-style:none;padding:0}.draft-list li{display:flex;justify-content:space-between;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--border)}.draft-list small{display:block}.submit-wrapper{display:inline-flex}.submit-wrapper:focus-visible{outline:2px solid currentColor;outline-offset:4px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
   form input:not([type=checkbox]),form textarea{font-weight:400}
 </style>

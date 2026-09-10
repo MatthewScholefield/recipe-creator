@@ -1,5 +1,5 @@
 <script lang="ts">
-  let { createdAt }: {createdAt?: string | null} = $props();
+  let { createdAt, label = 'Uploaded' }: {createdAt?: string | null; label?: string} = $props();
 
   const display = $derived.by(() => {
     if (!createdAt?.trim()) return null;
@@ -27,7 +27,7 @@
 </script>
 
 {#if display}
-  <span class="photo-date">Uploaded <time datetime={createdAt!} title={`Uploaded ${display.absolute}`} aria-label={`Uploaded ${display.absolute}`}>{display.relative}</time></span>
+  <span class="photo-date">{label} <time datetime={createdAt!} title={`${label} ${display.absolute}`} aria-label={`${label} ${display.absolute}`}>{display.relative}</time></span>
 {:else}
   <span class="photo-date">Upload date unavailable</span>
 {/if}
