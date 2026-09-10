@@ -7,6 +7,7 @@ import re
 from copy import deepcopy
 from fractions import Fraction
 from hashlib import sha256
+from unicodedata import normalize
 
 _VULGAR = {"¼": "1/4", "½": "1/2", "¾": "3/4", "⅐": "1/7", "⅑": "1/9",
            "⅒": "1/10", "⅓": "1/3", "⅔": "2/3", "⅕": "1/5", "⅖": "2/5",
@@ -23,8 +24,24 @@ _AMBIGUOUS = re.compile(
     r"\b(?:to taste|as needed|as required|optional|or|and/or|package\w*|packets?|packs?|"
     r"cans?|tins?|jars?|bottles?|boxes?|bags?|sachets?|handfuls?|pinch\w*|dash\w*)\b", re.IGNORECASE,
 )
-_VOLUME = r"(?:cups?|tablespoons?|tbsp|teaspoons?|tsp|ml|millilit(?:er|re)s?|l|lit(?:er|re)s?|fl\.?\s*oz)"
-_COUNTS = r"(?:cloves?|eggs?|onions?|apples?|bananas?|lemons?|limes?|potatoes|tomatoes|carrots?)"
+_UNIT_ALIASES = {
+    "cup": "cup", "cups": "cup",
+    "tablespoon": "tbsp", "tablespoons": "tbsp", "tbsp": "tbsp",
+    "teaspoon": "tsp", "teaspoons": "tsp", "tsp": "tsp",
+    "ml": "ml", "milliliter": "ml", "milliliters": "ml",
+    "millilitre": "ml", "millilitres": "ml",
+    "l": "l", "liter": "l", "liters": "l", "litre": "l", "litres": "l",
+    "fl oz": "fl oz", "fl. oz": "fl oz",
+    "clove": "clove", "cloves": "clove", "egg": "egg", "eggs": "egg",
+    "onion": "onion", "onions": "onion", "apple": "apple", "apples": "apple",
+    "banana": "banana", "bananas": "banana", "lemon": "lemon", "lemons": "lemon",
+    "lime": "lime", "limes": "lime", "potato": "potato", "potatoes": "potato",
+    "tomato": "tomato", "tomatoes": "tomato", "carrot": "carrot", "carrots": "carrot",
+}
+_VOLUME_UNITS = {"cup", "tbsp", "tsp", "ml", "l", "fl oz"}
+_ESTIMATION_UNITS = "|".join(
+    re.escape(unit) for unit in sorted(_UNIT_ALIASES, key=len, reverse=True)
+)
 
 
 def parse_quantity(value: str | float | None) -> tuple[float, float] | None:
@@ -91,20 +108,39 @@ def author_confirmed(ingredient: dict) -> bool:
             or isinstance(grams, dict) and grams.get("source") == "author_confirmed")
 
 
+def gram_estimation_basis(ingredient: dict) -> dict | None:
+    """Return a quantity-independent conversion key and the authored quantity range."""
+    text = format_ingredient(ingredient)
+    if _AMBIGUOUS.search(text) or re.search(r"[()]|(?<=[A-Za-z])\s*/\s*(?=[A-Za-z])", text):
+        return None
+    match = re.match(rf"^\s*(.+?)\s+({_ESTIMATION_UNITS})\b(.*)$", text, re.IGNORECASE)
+    amount = parse_quantity(match[1]) if match else None
+    if match is None or amount is None:
+        return None
+    raw_unit = re.sub(r"\s+", " ", match[2].strip().casefold()).rstrip(".")
+    unit = _UNIT_ALIASES.get(raw_unit)
+    if unit is None:
+        return None
+    tail = match[3].strip()
+    label = tail if unit in _VOLUME_UNITS else f"{unit}{(' ' + tail) if tail else ''}"
+    label = " ".join(normalize("NFKC", label).casefold().split()).strip(" ,")
+    if not label:
+        return None
+    return {
+        "unit": unit,
+        "ingredient_label": label,
+        "quantity_low": amount[0],
+        "quantity_high": amount[1],
+    }
+
+
 def estimation_eligible(ingredient: dict) -> bool:
     """Only explicit, unambiguous ingredient-dependent volume/count amounts go to AI."""
     if author_confirmed(ingredient) or ingredient.get("grams_input_hash") == ingredient_hash(ingredient) and (
         ingredient.get("grams") is not None or ingredient.get("grams_range") is not None
     ):
         return False
-    text = format_ingredient(ingredient)
-    if _AMBIGUOUS.search(text) or re.search(r"[()]|(?<=[A-Za-z])\s*/\s*(?=[A-Za-z])", text):
-        return False
-    match = re.match(rf"^\s*(.+?)\s+({_VOLUME}|{_COUNTS})\b(.*)$", text, re.IGNORECASE)
-    if not match or parse_quantity(match[1]) is None:
-        return False
-    # Volume without an ingredient identity has no density basis.
-    return bool(match[3].strip()) or bool(re.fullmatch(_COUNTS, match[2], re.IGNORECASE))
+    return gram_estimation_basis(ingredient) is not None
 
 
 def invalidate_estimates(ingredient: dict) -> dict:

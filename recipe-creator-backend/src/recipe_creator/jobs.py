@@ -10,8 +10,14 @@ from uuid import uuid4
 
 from logly import logger
 
-from .ai import consume_ai_quota, estimate_grams
-from .ingredients import enrich_ingredient_groups, estimation_eligible, ingredient_hash
+from .ai import consume_ai_quota, estimate_gram_bases
+from .ingredients import (
+    REGIONAL_ASSUMPTION,
+    enrich_ingredient_groups,
+    estimation_eligible,
+    gram_estimation_basis,
+    ingredient_hash,
+)
 from .repository import ConflictError
 from .settings import Settings
 
@@ -35,6 +41,39 @@ def enrichment_hash(recipe: dict) -> str:
         for group in recipe.get("ingredient_groups", [])]}
     return sha256(json.dumps(content, sort_keys=True, ensure_ascii=False,
                              separators=(",", ":")).encode()).hexdigest()
+
+
+def gram_conversion_key(basis: dict) -> str:
+    reusable = {
+        "unit": basis["unit"],
+        "ingredient_label": basis["ingredient_label"],
+        "regional_assumption": REGIONAL_ASSUMPTION,
+    }
+    return sha256(json.dumps(reusable, sort_keys=True, ensure_ascii=False,
+                             separators=(",", ":")).encode()).hexdigest()
+
+
+def _conversion_fields(conversion: dict) -> dict:
+    keys = (
+        "cache_key", "unit", "ingredient_label", "grams_per_unit_low",
+        "grams_per_unit_high", "basis", "assumptions", "regional_assumption", "model",
+    )
+    return {key: deepcopy(conversion[key]) for key in keys if key in conversion}
+
+
+async def _store_conversion(repo, request: dict, estimate: dict) -> dict:
+    key = request["cache_key"]
+    data = {
+        **request,
+        **_conversion_fields(estimate),
+    }
+    try:
+        return await repo.create("gram_conversions", data, id=key)
+    except ConflictError:
+        existing = await repo.get("gram_conversions", key)
+        if existing is None:
+            raise
+        return existing
 
 
 async def enqueue_enrichment(repo, recipe: dict) -> dict:
@@ -69,29 +108,81 @@ async def enqueue_enrichment(repo, recipe: dict) -> dict:
 
 
 async def enrich_recipe(recipe: dict, settings: Settings, *, repo=None) -> list[dict]:
-    """Mass is deterministic; optional ingredient-dependent AI uses durable budgets."""
+    """Apply deterministic mass conversion, then one cached/batched AI estimation pass."""
     groups = enrich_ingredient_groups(recipe.get("ingredient_groups", []))
-    if not getattr(settings, "ai_estimation_enabled", True) or not settings.ai_api_key.get_secret_value():
-        return groups
+    pending: dict[str, dict] = {}
     for group in groups:
         for item in group.get("ingredients", []):
             if not estimation_eligible(item):
                 continue
-            if repo is None:
-                raise ValueError("AI estimation requires a durable quota repository")
-            await consume_ai_quota(repo, settings, user_id=recipe.get("owner_id"))
-            estimate = await estimate_grams(item, settings)
-            item.update(grams_input_hash=estimate["input_hash"], grams_estimate=True,
-                        grams_provenance={"source": "ai_estimate", **estimate})
-            if estimate["refusal_reason"]:
-                item["grams_error"] = "estimation_refused"
+            basis = gram_estimation_basis(item)
+            if basis is None:
+                continue
+            key = gram_conversion_key(basis)
+            entry = pending.setdefault(key, {
+                "request": {
+                    "cache_key": key,
+                    "unit": basis["unit"],
+                    "ingredient_label": basis["ingredient_label"],
+                },
+                "targets": [],
+            })
+            entry["targets"].append((item, basis))
+    if not pending:
+        return groups
+
+    ai_available = (
+        getattr(settings, "ai_estimation_enabled", True)
+        and bool(settings.ai_api_key.get_secret_value())
+    )
+    if repo is None:
+        if ai_available:
+            raise ValueError("AI estimation requires a durable quota repository")
+        return groups
+
+    conversions = {}
+    for key in pending:
+        cached = await repo.get("gram_conversions", key)
+        if cached is not None:
+            conversions[key] = cached
+
+    missing = [entry["request"] for key, entry in pending.items() if key not in conversions]
+    if missing and ai_available:
+        await consume_ai_quota(repo, settings, user_id=recipe.get("owner_id"))
+        for estimate in await estimate_gram_bases(missing, settings):
+            key = estimate["cache_key"]
+            if estimate["refusal_reason"] is not None:
+                conversions[key] = estimate
             else:
-                item.update(grams={"low": estimate["grams_low"], "high": estimate["grams_high"],
-                                   "source": "ai_estimate", "input_hash": estimate["input_hash"],
-                                   "model": estimate["model"], "basis": estimate["basis"],
-                                   "regional_assumption": estimate["regional_assumption"],
-                                   "assumptions": estimate["assumptions"]},
-                            grams_range=[estimate["grams_low"], estimate["grams_high"]])
+                conversions[key] = await _store_conversion(repo, pending[key]["request"], estimate)
+
+    for key, conversion in conversions.items():
+        details = _conversion_fields(conversion)
+        refusal = conversion.get("refusal_reason")
+        for item, basis in pending[key]["targets"]:
+            input_hash = ingredient_hash(item)
+            provenance = {"source": "ai_estimate", **details}
+            item.update(
+                grams_input_hash=input_hash,
+                grams_estimate=True,
+                grams_provenance=provenance,
+            )
+            if refusal is not None:
+                item["grams_error"] = "estimation_refused"
+                item["grams_provenance"]["refusal_reason"] = refusal
+                continue
+            low = basis["quantity_low"] * conversion["grams_per_unit_low"]
+            high = basis["quantity_high"] * conversion["grams_per_unit_high"]
+            item.update(
+                grams={
+                    "low": low,
+                    "high": high,
+                    "source": "ai_estimate",
+                    "input_hash": input_hash,
+                    **details,
+                },
+                grams_range=[low, high],
+            )
     return groups
 
 

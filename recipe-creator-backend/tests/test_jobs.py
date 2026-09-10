@@ -14,7 +14,10 @@ from recipe_creator.settings import Settings
 class MemoryRepository:
     """Transactional fake; shared storage survives runner recreation."""
     def __init__(self):
-        self.rows = {"recipes": {}, "jobs": {}, "revisions": {}, "usage": {}}
+        self.rows = {
+            "recipes": {}, "jobs": {}, "revisions": {}, "usage": {},
+            "gram_conversions": {},
+        }
         self._tx = None
         self.lock = asyncio.Lock()
 
@@ -249,39 +252,93 @@ async def test_quota_shared_global_user_ip_atomic_and_durable(repo):
     assert all("127.0.0.1" not in str(row) for row in before.values())
 
 
-async def test_ai_job_persists_provenance_and_uses_quota(repo):
-    from pydantic_ai.models.test import TestModel
+async def test_ai_job_batches_deduplicates_and_reuses_global_conversion_cache(repo):
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.models.function import FunctionModel
     from recipe_creator.ai import estimator_agent
-    from recipe_creator.ingredients import REGIONAL_ASSUMPTION, ingredient_hash
-    item = {"text": "1 cup flour"}
-    repo.rows["recipes"]["r"].update(ingredient_groups=[{"ingredients": [item]}], owner_id="u")
+    from recipe_creator.ingredients import REGIONAL_ASSUMPTION
+
+    ingredients = [
+        {"text": "0.5 cups tapioca starch"},
+        {"text": "2 cups tapioca starch"},
+        {"text": "3 eggs"},
+    ]
+    repo.rows["recipes"]["r"].update(
+        ingredient_groups=[{"ingredients": ingredients}], owner_id="u",
+    )
     job = await enqueue(repo)
-    estimate = {"input_hash": ingredient_hash(item), "grams_low": 115, "grams_high": 130,
-                "basis": "All-purpose flour density", "regional_assumption": REGIONAL_ASSUMPTION,
-                "assumptions": ["Level spooned cup"]}
-    with estimator_agent.override(model=TestModel(custom_output_args=estimate)):
+    calls = []
+
+    async def respond(messages, info):
+        from pydantic_ai.messages import UserPromptPart
+        import json
+        payload = json.loads(next(
+            part.content for message in messages for part in message.parts
+            if isinstance(part, UserPromptPart)
+        ))
+        calls.append(payload)
+        assert [(item["unit"], item["ingredient_label"]) for item in payload["items"]] == [
+            ("cup", "tapioca starch"), ("egg", "egg"),
+        ]
+        rows = []
+        for item in payload["items"]:
+            low, high = ((100, 120) if item["unit"] == "cup" else (45, 55))
+            rows.append({
+                "cache_key": item["cache_key"],
+                "grams_per_unit_low": low,
+                "grams_per_unit_high": high,
+                "basis": f"Typical {item['ingredient_label']}",
+                "assumptions": ["Typical preparation"],
+            })
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
+            "regional_assumption": REGIONAL_ASSUMPTION,
+            "items": rows,
+        })])
+
+    with estimator_agent.override(model=FunctionModel(respond)):
         await JobRunner(repo, Settings(ai_api_key="test-only")).run_once()
-    current = await repo.get("recipes", "r")
-    enriched = current["ingredient_groups"][0]["ingredients"][0]
-    assert enriched["grams"]["low"] == 115
-    assert enriched["grams_provenance"]["basis"] == estimate["basis"]
-    assert enriched["grams_provenance"]["assumptions"] == estimate["assumptions"]
-    assert enriched["grams_provenance"]["model"] == Settings().ai_model
+    completed = await repo.get("jobs", job["id"])
+    assert completed["state"] == "succeeded", completed.get("last_error")
+    saved = (await repo.get("recipes", "r"))["ingredient_groups"][0]["ingredients"]
+    assert [(row["grams"]["low"], row["grams"]["high"]) for row in saved] == [
+        (50, 60), (200, 240), (135, 165),
+    ]
+    assert len(calls) == 1
+    assert len(repo.rows["gram_conversions"]) == 2
     assert (await repo.get("jobs", job["id"]))["state"] == "succeeded"
-    assert len(repo.rows["usage"]) == 2
     assert all(row["count"] == 2 for row in repo.rows["usage"].values())
+
+    second_recipe = {
+        "id": "second", "revision": 1,
+        "ingredient_groups": [{"ingredients": [{"text": "1.5 cups Tapioca   Starch"}]}],
+    }
+    before_usage = deepcopy(repo.rows["usage"])
+    reused = await jobs.enrich_recipe(second_recipe, Settings(), repo=repo)
+    grams = reused[0]["ingredients"][0]["grams"]
+    assert (grams["low"], grams["high"]) == (150, 180)
+    assert repo.rows["usage"] == before_usage
 
 
 async def test_refusal_is_persisted_without_fabricated_grams(repo):
     from pydantic_ai.models.test import TestModel
     from recipe_creator.ai import estimator_agent
-    from recipe_creator.ingredients import REGIONAL_ASSUMPTION, ingredient_hash
+    from recipe_creator.ingredients import REGIONAL_ASSUMPTION, gram_estimation_basis
+
     item = {"text": "1 cup mystery flour"}
     repo.rows["recipes"]["r"]["ingredient_groups"] = [{"ingredients": [item]}]
     job = await enqueue(repo)
-    refusal = {"input_hash": ingredient_hash(item), "grams_low": None, "grams_high": None,
-               "basis": "Density unknown", "regional_assumption": REGIONAL_ASSUMPTION,
-               "assumptions": ["No density assumed"], "refusal_reason": "Unknown ingredient"}
+    key = jobs.gram_conversion_key(gram_estimation_basis(item))
+    refusal = {
+        "regional_assumption": REGIONAL_ASSUMPTION,
+        "items": [{
+            "cache_key": key,
+            "grams_per_unit_low": None,
+            "grams_per_unit_high": None,
+            "basis": "Density unknown",
+            "assumptions": ["No density assumed"],
+            "refusal_reason": "Unknown ingredient",
+        }],
+    }
     with estimator_agent.override(model=TestModel(custom_output_args=refusal)):
         await JobRunner(repo, Settings(ai_api_key="test-only")).run_once()
     saved = (await repo.get("recipes", "r"))["ingredient_groups"][0]["ingredients"][0]
@@ -380,23 +437,35 @@ async def test_real_db_quota_concurrency_and_rollback(real_repo):
 async def test_real_db_ai_output_persistence(real_repo):
     from pydantic_ai.models.test import TestModel
     from recipe_creator.ai import estimator_agent
-    from recipe_creator.ingredients import REGIONAL_ASSUMPTION, ingredient_hash
+    from recipe_creator.ingredients import (
+        REGIONAL_ASSUMPTION,
+        gram_estimation_basis,
+        ingredient_hash,
+    )
     item = {"text": "1 cup flour"}
     user = await real_repo.create("users", {"display_name": "Test"})
     recipe = await real_repo.create("recipes", {"owner_id": user["id"],
         "ingredient_groups": [{"ingredients": [item]}]})
     job = await enqueue_enrichment(real_repo, recipe)
-    estimate = {"input_hash": ingredient_hash(item), "grams_low": 115, "grams_high": 130,
-        "basis": "Loose flour density", "regional_assumption": REGIONAL_ASSUMPTION,
-        "assumptions": ["Level cup"]}
+    estimate = {
+        "regional_assumption": REGIONAL_ASSUMPTION,
+        "items": [{
+            "cache_key": jobs.gram_conversion_key(gram_estimation_basis(item)),
+            "grams_per_unit_low": 115,
+            "grams_per_unit_high": 130,
+            "basis": "Loose flour density",
+            "assumptions": ["Level cup"],
+        }],
+    }
     with estimator_agent.override(model=TestModel(custom_output_args=estimate)):
         await JobRunner(real_repo, Settings(ai_api_key="test-only")).run_once()
+    assert len(await real_repo.list("gram_conversions")) == 1
     completed = await real_repo.get("jobs", job["id"])
     assert completed["state"] == "succeeded", completed.get("last_error")
     saved = await real_repo.get("recipes", recipe["id"])
     grams = saved["ingredient_groups"][0]["ingredients"][0]["grams"]
     assert grams["input_hash"] == ingredient_hash(item)
-    assert grams["basis"] == estimate["basis"]
+    assert grams["basis"] == estimate["items"][0]["basis"]
     assert grams["model"] == Settings().ai_model
 
 
@@ -407,7 +476,7 @@ async def test_real_db_failure_persistence(real_repo, monkeypatch):
     failed = await enqueue_enrichment(real_repo, recipe)
     async def fail(*args, **kwargs):
         raise RuntimeError("secret provider payload")
-    monkeypatch.setattr(jobs, "estimate_grams", fail)
+    monkeypatch.setattr(jobs, "estimate_gram_bases", fail)
     await JobRunner(real_repo, Settings(ai_api_key="test-only", job_max_attempts=1)).run_once()
     row = await real_repo.get("jobs", failed["id"])
     assert row["state"] == "failed"

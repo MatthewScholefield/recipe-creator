@@ -14,16 +14,21 @@ from surreal_orm import SurrealDBConnectionManager as Connections
 from surreal_orm.migrations import Migration
 from surreal_orm.migrations.operations import CreateTable, RawSQL
 
-from recipe_creator.models import MODELS, Recipe, SiteSettings
+from recipe_creator.models import GramConversion, MODELS, Recipe, SiteSettings
 from recipe_creator.repository import ConflictError, NotFoundError, Repository, _MigrationExecutor
 from recipe_creator.settings import Settings
 
 
 def test_model_registry_and_nested_validation():
-    assert set(MODELS) == {"users", "devices", "pairings", "admin_sessions", "recipes", "revisions", "photos", "jobs", "audit", "usage", "site_settings"}
+    assert set(MODELS) == {
+        "users", "devices", "pairings", "admin_sessions", "recipes", "revisions",
+        "photos", "jobs", "gram_conversions", "audit", "usage", "site_settings",
+    }
     assert SiteSettings(copy={"site_title": "Recipes"}).model_dump()["copy"] == {"site_title": "Recipes"}
     with pytest.raises(ValidationError):
         Recipe(ingredient_groups=[{"ingredients": [{"grams": -1}]}])
+    with pytest.raises(ValidationError):
+        GramConversion(grams_per_unit_low=130, grams_per_unit_high=110)
 
 
 @pytest_asyncio.fixture
@@ -176,12 +181,15 @@ async def test_security_cutover_from_existing_database(repo):
             await old._connection.query("CREATE admin_sessions:legacy CONTENT {secret_hash: 'historical', expires_at: time::now() + 1d, created_at: time::now(), updated_at: time::now(), payload: {}};")
             recipe = await old.create('recipes', {'title': 'Original', 'source_text': ' Exact\\r\\nprose ', 'tags': ['Dinner', 'Breakfast', 'Cafe\u0301'], 'owner_id': 'legacy'})
             before = await old.get('recipes', recipe['id'])
-            assert await old.migrate() == ['0002_user_admin_site_settings']
+            assert await old.migrate() == [
+                '0002_user_admin_site_settings', '0003_gram_conversion_cache',
+            ]
             user = await old.get('users', 'legacy')
             assert user['is_admin'] is False and user['photo_trust'] is True
             assert (await old.get('admin_sessions', 'legacy'))['revoked_at']
             assert await old.get('recipes', recipe['id']) == before
             assert not await old.list('site_settings')
+            assert not await old.list('gram_conversions')
             await old.update('users', 'legacy', {'is_admin': True})
             assert await old.migrate() == []
             assert (await old.get('users', 'legacy'))['is_admin']

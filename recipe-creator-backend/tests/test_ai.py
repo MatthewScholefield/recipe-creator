@@ -264,64 +264,95 @@ async def test_timeout_and_concurrency():
     assert active == 0
 
 
-async def test_estimator_typed_separate_hash_bound_and_private():
-    from recipe_creator.ai import estimate_grams, estimator_agent
-    from recipe_creator.ingredients import REGIONAL_ASSUMPTION, ingredient_hash
+async def test_estimator_batches_typed_quantity_independent_bases():
+    from recipe_creator.ai import estimate_gram_bases, estimator_agent
+    from recipe_creator.ingredients import REGIONAL_ASSUMPTION
 
-    ingredient = {"text": "1 cup flour", "private_author": "private"}
+    items = [
+        {"cache_key": "a" * 64, "unit": "cup", "ingredient_label": "tapioca starch"},
+        {"cache_key": "b" * 64, "unit": "egg", "ingredient_label": "egg"},
+    ]
     calls = []
 
     async def respond(messages, info):
-        payload = json.loads(next(p.content for m in messages for p in m.parts if isinstance(p, UserPromptPart)))
-        assert set(payload) == {"ingredient", "input_hash", "regional_assumption"}
-        assert set(payload["ingredient"]) == {"text", "quantity", "unit", "name"}
-        assert payload["regional_assumption"] == REGIONAL_ASSUMPTION
+        payload = json.loads(next(
+            p.content for message in messages for p in message.parts
+            if isinstance(p, UserPromptPart)
+        ))
+        assert payload == {"items": items, "regional_assumption": REGIONAL_ASSUMPTION}
         calls.append(1)
-        data = {"input_hash": "0" * 64 if len(calls) == 1 else ingredient_hash(ingredient),
-                "grams_low": 115, "grams_high": 130, "basis": "Loose all-purpose flour density",
-                "regional_assumption": REGIONAL_ASSUMPTION,
-                "assumptions": ["Spoon-filled, level US cup", "All-purpose wheat flour"]}
+        estimates = [
+            {"cache_key": item["cache_key"], "grams_per_unit_low": 110,
+             "grams_per_unit_high": 125, "basis": f"One {item['unit']}",
+             "assumptions": ["Typical preparation"]}
+            for item in items
+        ]
+        if len(calls) == 1:
+            estimates[0]["cache_key"] = "c" * 64
+        data = {"regional_assumption": REGIONAL_ASSUMPTION, "items": estimates}
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, data)])
 
     with estimator_agent.override(model=FunctionModel(respond)):
-        result = await estimate_grams(ingredient, Settings(ai_model="openai:test-model"))
+        result = await estimate_gram_bases(items, Settings(ai_model="openai:test-model"))
     assert len(calls) == 2
-    assert result["model"] == "openai:test-model"
-    assert result["grams_low"] == 115
-    assert ingredient == {"text": "1 cup flour", "private_author": "private"}
+    assert [item["cache_key"] for item in result] == ["a" * 64, "b" * 64]
+    assert all(item["model"] == "openai:test-model" for item in result)
 
 
 @pytest.mark.parametrize("change", [
-    {"grams_low": -1}, {"grams_high": float("inf")}, {"grams_low": 200},
-    {"grams_high": None}, {"regional_assumption": "UK"}, {"assumptions": [" "]},
-    {"refusal_reason": "uncertain"}, {"input_hash": "0" * 64},
+    {"grams_per_unit_low": -1},
+    {"grams_per_unit_high": float("inf")},
+    {"grams_per_unit_low": 200},
+    {"grams_per_unit_high": None},
+    {"assumptions": [" "]},
+    {"refusal_reason": "uncertain"},
 ])
 def test_invalid_estimates_are_rejected(change):
-    from recipe_creator.ai import GramEstimateOutput, GramEstimateRequest, validate_gram_estimate
-    from recipe_creator.ingredients import REGIONAL_ASSUMPTION, ingredient_hash
+    from recipe_creator.ai import (
+        GramEstimateBatchOutput,
+        GramEstimateBatchRequest,
+        validate_gram_estimates,
+    )
+    from recipe_creator.ingredients import REGIONAL_ASSUMPTION
 
-    item = {"text": "1 cup flour"}
-    request = GramEstimateRequest(ingredient=item, input_hash=ingredient_hash(item))
-    values = {"input_hash": request.input_hash, "grams_low": 110, "grams_high": 130,
-              "basis": "Flour density", "assumptions": ["Level cup"],
-              "regional_assumption": REGIONAL_ASSUMPTION, **change}
+    request = GramEstimateBatchRequest(items=[{
+        "cache_key": "a" * 64, "unit": "cup", "ingredient_label": "flour",
+    }])
+    item = {
+        "cache_key": "a" * 64,
+        "grams_per_unit_low": 110,
+        "grams_per_unit_high": 130,
+        "basis": "Flour density",
+        "assumptions": ["Level cup"],
+        **change,
+    }
     with pytest.raises(ValueError):
-        validate_gram_estimate(request, GramEstimateOutput.model_validate(values))
+        output = GramEstimateBatchOutput.model_validate({
+            "regional_assumption": REGIONAL_ASSUMPTION,
+            "items": [item],
+        })
+        validate_gram_estimates(request, output)
 
 
-async def test_estimator_refusal_and_ineligible_no_network():
-    from recipe_creator.ai import estimate_grams, estimator_agent
-    from recipe_creator.ingredients import REGIONAL_ASSUMPTION, ingredient_hash
+async def test_estimator_refusal():
+    from recipe_creator.ai import estimate_gram_bases, estimator_agent
+    from recipe_creator.ingredients import REGIONAL_ASSUMPTION
 
-    item = {"text": "1 cup unknown flour"}
-    refusal = {"input_hash": ingredient_hash(item), "grams_low": None, "grams_high": None,
-               "basis": "Ingredient density unknown", "assumptions": ["No density assumed"],
-               "regional_assumption": REGIONAL_ASSUMPTION, "refusal_reason": "Unknown ingredient"}
+    item = {"cache_key": "a" * 64, "unit": "cup", "ingredient_label": "unknown flour"}
+    refusal = {
+        "regional_assumption": REGIONAL_ASSUMPTION,
+        "items": [{
+            "cache_key": item["cache_key"],
+            "grams_per_unit_low": None,
+            "grams_per_unit_high": None,
+            "basis": "Density unknown",
+            "assumptions": ["No density assumed"],
+            "refusal_reason": "Unknown ingredient",
+        }],
+    }
     with estimator_agent.override(model=TestModel(custom_output_args=refusal)):
-        assert (await estimate_grams(item, Settings()))["refusal_reason"] == "Unknown ingredient"
-    for text in ("salt to taste", "1 package flour", "1 cup flour or sugar", "200 g flour"):
-        with pytest.raises(ValueError, match="not eligible"):
-            await estimate_grams({"text": text}, Settings())
+        result = await estimate_gram_bases([item], Settings())
+    assert result[0]["refusal_reason"] == "Unknown ingredient"
 
 
 async def test_openai_alias_and_runtime_reused():
@@ -334,9 +365,12 @@ async def test_openai_alias_and_runtime_reused():
 
 
 async def test_estimator_timeout_uses_bounded_runtime():
-    from recipe_creator.ai import estimate_grams, estimator_agent
+    from recipe_creator.ai import estimate_gram_bases, estimator_agent
     async def respond(messages, info):
         await asyncio.sleep(1)
     with estimator_agent.override(model=FunctionModel(respond)):
         with pytest.raises(TimeoutError):
-            await estimate_grams({"text": "1 cup flour"}, Settings(ai_timeout_seconds=.001))
+            await estimate_gram_bases(
+                [{"cache_key": "a" * 64, "unit": "cup", "ingredient_label": "flour"}],
+                Settings(ai_timeout_seconds=.001),
+            )

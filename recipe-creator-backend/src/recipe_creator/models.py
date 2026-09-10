@@ -6,7 +6,7 @@ cascading away authored content or immutable historical attribution.
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from surreal_orm import BaseSurrealModel, SurrealConfigDict
 from surreal_orm.fields import ForeignKey
 from surreal_orm.types import SchemaMode
@@ -131,6 +131,26 @@ class EnrichmentJob(DomainModel):
     revision: int = Field(default=1, ge=1)
 
 
+
+class GramConversion(DomainModel):
+    model_config = SurrealConfigDict(table_name="gram_conversions")
+    cache_key: str = ""
+    unit: str = ""
+    ingredient_label: str = ""
+    grams_per_unit_low: float = Field(default=0, ge=0, allow_inf_nan=False)
+    grams_per_unit_high: float = Field(default=0, ge=0, allow_inf_nan=False)
+    basis: str = ""
+    assumptions: list[str] = Field(default_factory=list)
+    regional_assumption: str = ""
+    model: str = ""
+
+    @model_validator(mode="after")
+    def ordered_range(self):
+        if self.grams_per_unit_high < self.grams_per_unit_low:
+            raise ValueError("grams_per_unit_high must not be below grams_per_unit_low")
+        return self
+
+
 class AuditEvent(DomainModel):
     model_config = SurrealConfigDict(table_name="audit")
     actor_id: ForeignKey("User", on_delete="PROTECT") = None
@@ -155,5 +175,5 @@ class SiteSettings(DomainModel):
 
 MODELS = {model.get_table_name(): model for model in (
     User, DeviceCredential, PairingSession, AdminSession, Recipe,
-    RecipeRevision, Photo, EnrichmentJob, AuditEvent, UsageBucket, SiteSettings,
+    RecipeRevision, Photo, EnrichmentJob, GramConversion, AuditEvent, UsageBucket, SiteSettings,
 )}

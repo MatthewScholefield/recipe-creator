@@ -4,7 +4,8 @@ import pytest
 
 from recipe_creator.ingredients import (
     convert_to_grams, enrich_ingredient, enrich_ingredient_groups,
-    format_ingredient, format_recipe, ingredient_hash, invalidate_estimates, parse_quantity,
+    format_ingredient, format_recipe, gram_estimation_basis, ingredient_hash,
+    invalidate_estimates, parse_quantity,
 )
 
 
@@ -74,6 +75,21 @@ def test_groups_and_formatter_are_stable_and_non_mutating():
 def test_volume_count_estimation_is_ingredient_dependent(text):
     from recipe_creator.ingredients import estimation_eligible
     assert estimation_eligible(enrich_ingredient({"text": text}))
+
+
+def test_estimation_basis_normalizes_quantity_independent_cache_identity():
+    half = gram_estimation_basis({"text": "0.5 cups Tapioca   Starch"})
+    one_and_half = gram_estimation_basis({"text": "1.5 cup tapioca starch"})
+    assert half == {
+        "unit": "cup", "ingredient_label": "tapioca starch",
+        "quantity_low": .5, "quantity_high": .5,
+    }
+    assert {
+        key: one_and_half[key] for key in ("unit", "ingredient_label")
+    } == {
+        key: half[key] for key in ("unit", "ingredient_label")
+    }
+    assert (one_and_half["quantity_low"], one_and_half["quantity_high"]) == (1.5, 1.5)
 
 
 @pytest.mark.parametrize("text", ["salt to taste", "1 package sugar", "1 can tomatoes",
