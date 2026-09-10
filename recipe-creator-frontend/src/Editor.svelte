@@ -250,6 +250,7 @@
     {#if recovered}
       <section class="draft-recovery card draft" aria-labelledby="restore-draft-heading">
         <h2 id="restore-draft-heading">Restore draft?</h2>
+        <p class="draft-recovery-description">“{recovered.draft.title.trim() || 'Untitled recipe'}”</p>
         <PhotoDate createdAt={recovered.saved} label="You edited" />
         <div class="toolbar"><Button variant="primary" onclick={restoreEdit}><Icon name="edit" size={16} />Edit draft</Button><Button variant="danger" onclick={discardRecoveredDraft}><Icon name="trash" size={16} />Discard draft</Button></div>
       </section>
@@ -316,6 +317,6 @@
   {/if}
 {/if}
 <style>
-  .line-row{display:flex;align-items:center;gap:.25rem;margin:.4rem 0}.line-row label{flex:1;margin:0;min-width:0}.line-row input{width:100%}.ghost{display:inline-flex;align-items:center;gap:.3rem;background:transparent;border-color:transparent;padding:.35rem .5rem;font-size:.9rem}.toolbar{flex-wrap:wrap}.draft-actions{margin-bottom:1rem}.draft-badge{font-size:.85rem;color:var(--muted)}.draft-recovery{border-style:dashed;max-width:32rem}.draft-list{list-style:none;padding:0}.draft-list li{display:flex;justify-content:space-between;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--border)}.draft-list small{display:block}.submit-wrapper{display:inline-flex}.submit-wrapper:focus-visible{outline:2px solid currentColor;outline-offset:4px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  .line-row{display:flex;align-items:center;gap:.25rem;margin:.4rem 0}.line-row label{flex:1;margin:0;min-width:0}.line-row input{width:100%}.ghost{display:inline-flex;align-items:center;gap:.3rem;background:transparent;border-color:transparent;padding:.35rem .5rem;font-size:.9rem}.toolbar{flex-wrap:wrap}.draft-actions{margin-bottom:1rem}.draft-badge{font-size:.85rem;color:var(--muted)}.draft-recovery{border-style:dashed;max-width:32rem}.draft-recovery h2{margin-top:0}.draft-recovery-description{margin:.25rem 0;color:var(--muted);font-weight:600}.draft-list{list-style:none;padding:0}.draft-list li{display:flex;justify-content:space-between;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--border)}.draft-list small{display:block}.submit-wrapper{display:inline-flex}.submit-wrapper:focus-visible{outline:2px solid currentColor;outline-offset:4px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
   form input:not([type=checkbox]),form textarea{font-weight:400}
 </style>
