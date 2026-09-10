@@ -105,14 +105,13 @@ async def test_anonymous_transform_and_lookup_security(identity_app, monkeypatch
     identity_app.include_router(recipes.router)
     async def organized(source, settings):
         return {
-            "source_hash": ai.source_hash(source),
-            "source_text": source,
             "description": source,
             "directions": "",
             "notes": "",
             "ingredient_groups": [],
-            "unclassified": "",
-            "warnings": [],
+            "yield_amount": None,
+            "yield_unit": "",
+            "source_url": "",
         }
     monkeypatch.setattr(ai, 'parse_recipe', organized)
     async with client(identity_app) as browser:

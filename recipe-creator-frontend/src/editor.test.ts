@@ -21,10 +21,10 @@ function mockApi(handler: (url: string, init?: RequestInit) => unknown | Promise
 function localDraft(structured = false) {
   const value = createDraft('Soup'); value.draft = structured ? {...recipe} : {...blank(),title:'Soup',source_text:'  Exact source\n'}; saveDraft(value); return value;
 }
-function parseResult(source = '  Exact source\n') { return {source_hash:'hash',source_text:source,description:'',ingredient_groups:[{id:'g1',name:'',ingredients:[{...ingredient(),id:'i1',original_text:'2 eggs'}]}],directions:'  Exact source\n',notes:'',unclassified:'',warnings:[]}; }
+function parseResult() { return {description:'',ingredient_groups:[{id:'g1',name:'',ingredients:[{...ingredient(),id:'i1',original_text:'2 eggs',quantity:'2',name:'eggs'}]}],directions:'  Exact source\n',notes:'',yield_amount:'4',yield_unit:'servings',source_url:'https://example.com'}; }
 function lineResult(body: string) {
   const {lines} = JSON.parse(body) as {lines:{id:string;text:string}[]};
-  return {items:lines.map(line => ({...line,method:'deterministic',ingredient:{...changedIngredient(ingredient(),line.text),id:line.id,name:'eggs',quantity:'2'}})),warnings:[]};
+  return {items:lines.map(line => ({...line,method:'llm',ingredient:{...changedIngredient(ingredient(),line.text),id:line.id,name:'eggs',quantity:'2'}}))};
 }
 beforeEach(() => { localStorage.clear(); clearSession(); appState.identity = null; vi.restoreAllMocks(); });
 
@@ -42,50 +42,18 @@ it('does not substitute another draft for a missing draft URL', async () => {
   expect(await screen.findByRole('alert')).toHaveTextContent('missing or unreadable');
   expect(screen.queryByLabelText('Recipe title')).not.toBeInTheDocument(); expect(listDrafts()).toHaveLength(1);
 });
-it('organizes anonymously in two guarded stages and shows the bottom name tooltip', async () => {
-  const value = localDraft(); const fetcher = mockApi((url, init) => url === '/api/parse' ? parseResult() : lineResult(init!.body as string), false);
+it('organizes anonymously from the direct recipe result and shows the bottom name tooltip', async () => {
+  const value = localDraft(); const fetcher = mockApi(url => url === '/api/parse' ? parseResult() : recipe, false);
   render(Editor,{draftId:value.id,navigate:vi.fn()}); await screen.findByLabelText('Paste or write your recipe');
   const publish = screen.getByRole('button',{name:'Publish recipe'}); expect(publish).toBeDisabled();
   const wrapper = screen.getByRole('group',{name:'Set your name to publish'}); expect(wrapper).toHaveAttribute('tabindex','0');
   await fireEvent.focusIn(wrapper); expect(await screen.findByRole('tooltip')).toHaveTextContent('Set your name to publish');
   await fireEvent.click(screen.getByRole('button',{name:'Organize'}));
   expect(await screen.findByLabelText('Ingredient 1.1')).toHaveValue('2 eggs');
-  await waitFor(() => expect(fetcher.mock.calls.filter(([url]) => String(url).includes('/ingredients/parse'))).toHaveLength(1));
-  expect(fetcher.mock.calls.some(([url]) => String(url).includes('/identity'))).toBe(false);
+  expect(screen.getByLabelText('Yield amount')).toHaveValue('4');
+  expect(screen.getByLabelText('Source link')).toHaveValue('https://example.com');
+  expect(fetcher.mock.calls.some(([url]) => String(url).includes('/ingredients/parse'))).toBe(false);
   expect(screen.getByRole('button',{name:'Publish recipe'})).toBeDisabled();
-});
-it('explains organizer warnings and identifies ingredients kept as written', async () => {
-  const value = localDraft();
-  const parsed = {...parseResult(),unclassified:'A note that needs review',warnings:['unclassified_source']};
-  mockApi((url, init) => {
-    if (url === '/api/parse') return parsed;
-    const {lines} = JSON.parse(init!.body as string) as {lines:{id:string;text:string}[]};
-    return {items:lines.map(line => ({...line,method:'unparsed',ingredient:{...changedIngredient(ingredient(),line.text),id:line.id}})),warnings:['ingredient_fallback_invalid']};
-  });
-  render(Editor,{draftId:value.id,navigate:vi.fn()}); await screen.findByLabelText('Paste or write your recipe');
-  await fireEvent.click(screen.getByRole('button',{name:'Organize'}));
-  const heading = await screen.findByRole('heading',{name:'Ingredients kept as written'});
-  const information = heading.closest('section')!;
-  expect(information).toHaveTextContent('2 eggs');
-  expect(information).toHaveTextContent('Make sure that’s okay before saving');
-  expect(screen.getByText(/Some original text could not be placed in a recipe section/)).toBeInTheDocument();
-  expect(screen.getByText(/could not reliably read some ingredient quantities/)).toBeInTheDocument();
-  expect(screen.queryByText('unclassified_source')).not.toBeInTheDocument();
-  expect(screen.queryByText('ingredient_fallback_invalid')).not.toBeInTheDocument();
-});
-it('repairs duplicate parser IDs before the ingredient preview request', async () => {
-  const value = localDraft();
-  const parsed = parseResult();
-  parsed.ingredient_groups[0].ingredients.push({...parsed.ingredient_groups[0].ingredients[0], original_text: 'salt'});
-  const fetcher = mockApi((url, init) => url === '/api/parse' ? parsed : lineResult(init!.body as string), false);
-  render(Editor,{draftId:value.id,navigate:vi.fn()}); await screen.findByLabelText('Paste or write your recipe');
-  await fireEvent.click(screen.getByRole('button',{name:'Organize'}));
-  await waitFor(() => expect(fetcher.mock.calls.filter(([url]) => url === '/api/ingredients/parse')).toHaveLength(1));
-  const preview = fetcher.mock.calls.find(([url]) => url === '/api/ingredients/parse')!;
-  // The mock captures the request boundary; the payload shape is the contract under test.
-  const previewBody = JSON.parse(preview[1]!.body as string) as {lines:{id:string}[]};
-  const ids = previewBody.lines.map(line => line.id);
-  expect(new Set(ids).size).toBe(ids.length);
 });
 it('ignores whole-recipe results after typing and retains exact source on undo', async () => {
   const value = localDraft(); let finish!: (value: unknown) => void;
@@ -122,24 +90,12 @@ it('batches dirty lines at save, omits placeholders, and deletes only the succes
   expect(payload.ingredient_groups[0].ingredients[0]).toMatchObject({id:oldRow.id,original_text:'2 eggs',quantity:'2',grams:null});
   expect(readDraft(value.id)).toBeNull(); expect(readDraft(other.id)).not.toBeNull();
 });
-it('keeps second-stage classification on failure and explicitly saves original ingredient text without another parse', async () => {
-  const value = localDraft(); const fetcher = mockApi(url => url === '/api/parse' ? parseResult() : url === '/api/ingredients/parse' ? new Response(JSON.stringify({detail:'Quota exhausted'}),{status:429}) : recipe);
-  const navigate = vi.fn(); render(Editor,{draftId:value.id,navigate}); await screen.findByLabelText('Paste or write your recipe');
-  await fireEvent.click(screen.getByRole('button',{name:'Organize'}));
-  const fallback = await screen.findByRole('button',{name:'Save with original ingredient text'});
-  expect(screen.getByLabelText('Ingredient 1.1')).toHaveValue('2 eggs');
-  await fireEvent.click(fallback); await waitFor(() => expect(navigate).toHaveBeenCalled());
-  expect(fetcher.mock.calls.filter(([url]) => url === '/api/ingredients/parse')).toHaveLength(1);
-  const write = fetcher.mock.calls.find(([url]) => url === '/api/recipes')!;
-  expect(JSON.parse(write[1]!.body as string).ingredient_groups[0].ingredients[0]).toMatchObject({original_text:'2 eggs',quantity:null,grams:null,name:''});
-});
-it('ignores ingredient preview after reorder, cancel, and undo and preserves the original source', async () => {
-  const value = localDraft(); let finish!: (value: unknown) => void; let body = '';
-  mockApi((url, init) => url === '/api/parse' ? parseResult() : new Promise(resolve => {finish = resolve; body = init!.body as string;}));
+it('undoes direct recipe organization and preserves the original source', async () => {
+  const value = localDraft();
+  mockApi(url => url === '/api/parse' ? parseResult() : recipe);
   render(Editor,{draftId:value.id,navigate:vi.fn()}); await screen.findByLabelText('Paste or write your recipe');
   await fireEvent.click(screen.getByRole('button',{name:'Organize'})); await screen.findByLabelText('Ingredient 1.1');
-  await waitFor(() => expect(finish).toBeTypeOf('function'));
-  await fireEvent.click(screen.getByRole('button',{name:'Undo organization'})); finish(lineResult(body));
+  await fireEvent.click(screen.getByRole('button',{name:'Undo organization'}));
   expect(await screen.findByLabelText('Paste or write your recipe')).toHaveValue(value.draft.source_text); expect(screen.queryByLabelText('Ingredient 1.1')).not.toBeInTheDocument();
 });
 it('requires explicit tag creation and blocks conflicting classifiers without rewriting legacy tags', async () => {

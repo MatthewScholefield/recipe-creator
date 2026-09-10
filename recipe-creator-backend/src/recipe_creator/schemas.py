@@ -95,7 +95,6 @@ class RecipeDraft(StrictDTO):
     ingredient_groups: list[IngredientGroup] = Field(default_factory=list, max_length=50)
     directions: Prose = ""
     notes: Prose = ""
-    unclassified: Prose = ""
     tags: list[Annotated[str, Field(min_length=1, max_length=80)]] = Field(default_factory=list, max_length=50)
     yield_amount: Amount | None = None
     yield_unit: ShortText = ""
@@ -155,7 +154,7 @@ class RecipeDraft(StrictDTO):
             raise ValueError("Group and ingredient IDs must be unique")
         if len(rows) > 1000:
             raise ValueError("Too many ingredients")
-        if sum(len(getattr(self, key)) for key in ("source_text", "description", "directions", "notes", "unclassified", "modifications")) > 300_000:
+        if sum(len(getattr(self, key)) for key in ("source_text", "description", "directions", "notes", "modifications")) > 300_000:
             raise ValueError("Recipe is too large")
         return self
 
@@ -206,7 +205,6 @@ class Recipe(BaseModel):
     ingredient_groups: list[IngredientGroupOutput]
     directions: str
     notes: str
-    unclassified: str = ""
     tags: list[str]
     yield_amount: str | None
     yield_unit: str
@@ -374,24 +372,22 @@ class IngredientLinesRequest(StrictDTO):
 class IngredientLineResult(BaseModel):
     id: str
     text: str
-    method: Literal['deterministic', 'llm', 'unparsed']
+    method: Literal['llm']
     ingredient: IngredientOutput
 
 
 class IngredientLinesResult(BaseModel):
     items: list[IngredientLineResult]
-    warnings: list[str]
 
 
 class ParseResult(BaseModel):
-    source_hash: str
-    source_text: str
     description: str
     ingredient_groups: list[IngredientGroupOutput]
     directions: str
     notes: str
-    unclassified: str
-    warnings: list[str]
+    yield_amount: str | None
+    yield_unit: str
+    source_url: str
 
 
 class ParseRequest(StrictDTO):

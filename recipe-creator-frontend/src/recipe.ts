@@ -1,5 +1,5 @@
-import type { Ingredient, IngredientGroup, RecipeDraft, ParseResult } from './types';
-export function blank(mode: RecipeDraft['mode'] = 'text'): RecipeDraft { return { title: '', source_text: '', mode, description: '', ingredient_groups: [], directions: '', notes: '', unclassified: '', tags: [], yield_amount: null, yield_unit: '', source_url: '', modifications: '' }; }
+import type { Ingredient, RecipeDraft, ParseResult } from './types';
+export function blank(mode: RecipeDraft['mode'] = 'text'): RecipeDraft { return { title: '', source_text: '', mode, description: '', ingredient_groups: [], directions: '', notes: '', tags: [], yield_amount: null, yield_unit: '', source_url: '', modifications: '' }; }
 export function ingredient(): Ingredient { return { id: crypto.randomUUID(), original_text: '', quantity: null, quantity_max: null, unit: '', name: '', preparation: '', optional: false, grams: null }; }
 const fractions: Record<string, string> = { '½':'1/2','¼':'1/4','¾':'3/4','⅓':'1/3','⅔':'2/3','⅛':'1/8','⅜':'3/8','⅝':'5/8','⅞':'7/8' };
 export function quantity(value: string | null | undefined): number | null {
@@ -18,42 +18,24 @@ export function ingredientText(row: Ingredient, scale = 1, grams = false): strin
   return [scaled(row.quantity, scale) + range, row.unit, row.name].filter(Boolean).join(' ') + (row.preparation ? `, ${row.preparation}` : '') + (row.optional ? ' (optional)' : '');
 }
 export function formatRecipe(draft: RecipeDraft): string {
-  return [draft.description, draft.ingredient_groups.length ? 'Ingredients\n' + draft.ingredient_groups.map(group => [group.name && draft.ingredient_groups.length > 1 ? `=== ${group.name} ===` : '', ...group.ingredients.map(row => ingredientText(row))].filter(Boolean).join('\n')).join('\n\n') : '', draft.directions ? `Directions\n${draft.directions}` : '', draft.notes ? `Notes\n${draft.notes}` : '', draft.unclassified || ''].filter(Boolean).join('\n\n');
-}
-function claimUniqueId(candidate: string, used: Set<string>): string {
-  if (candidate && !used.has(candidate)) { used.add(candidate); return candidate; }
-  let replacement = crypto.randomUUID();
-  while (used.has(replacement)) replacement = crypto.randomUUID();
-  used.add(replacement);
-  return replacement;
+  return [draft.description, draft.ingredient_groups.length ? 'Ingredients\n' + draft.ingredient_groups.map(group => [group.name && draft.ingredient_groups.length > 1 ? `=== ${group.name} ===` : '', ...group.ingredients.map(row => ingredientText(row))].filter(Boolean).join('\n')).join('\n\n') : '', draft.directions ? `Directions\n${draft.directions}` : '', draft.notes ? `Notes\n${draft.notes}` : ''].filter(Boolean).join('\n\n');
 }
 export function applyParse(draft: RecipeDraft, result: ParseResult): RecipeDraft {
-  // Reuse IDs and derived metadata only for rows the organizer explicitly retained.
-  const oldRows = draft.ingredient_groups.flatMap(group => group.ingredients);
-  const usedRows = new Set<Ingredient>(), usedGroups = new Set<IngredientGroup>();
-  const groups = result.ingredient_groups.map(group => {
-    const ingredients = group.ingredients.map(output => {
-      const row: Ingredient = {...output, quantity: output.quantity ?? null, quantity_max: output.quantity_max ?? null, grams: output.grams ?? null};
-      const old = oldRows.find(candidate => !usedRows.has(candidate) && ingredientLine(candidate) === ingredientLine(row));
-      if (old) { usedRows.add(old); return old; }
-      return row;
-    });
-    const old = draft.ingredient_groups.find(candidate => !usedGroups.has(candidate) && (candidate.id === group.id ||
-      (candidate.name === group.name && candidate.ingredients.some(row => ingredients.some(item => item.id === row.id)))));
-    if (old) usedGroups.add(old);
-    return {...group, id: old?.id ?? group.id, ingredients};
-  });
-  // A malformed parser response or legacy in-memory draft must not leak duplicate keyed IDs
-  // into the next ingredient preview or save request. Repair collisions without adding rows.
-  const groupIds = new Set<string>(), rowIds = new Set<string>();
-  const normalizedGroups = groups.map(group => ({
-    ...group,
-    id: claimUniqueId(group.id, groupIds),
-    ingredients: group.ingredients.map(row => ({...row, id: claimUniqueId(row.id, rowIds)})),
-  }));
-  return {...draft, description: draft.description || result.description, ingredient_groups: normalizedGroups,
-    directions: draft.directions || result.directions, notes: draft.notes || result.notes,
-    unclassified: draft.unclassified || result.unclassified, mode: 'structured', source_text: draft.source_text};
+  return {
+    ...draft,
+    ...result,
+    ingredient_groups: result.ingredient_groups.map(group => ({
+      ...group,
+      ingredients: group.ingredients.map(row => ({
+        ...row,
+        quantity: row.quantity ?? null,
+        quantity_max: row.quantity_max ?? null,
+        grams: row.grams ?? null,
+      })),
+    })),
+    mode: 'structured',
+    source_text: draft.source_text,
+  };
 }
 export const MEAL_CLASSIFIERS = ['breakfast', 'lunch', 'dinner', 'dessert'] as const;
 export const classifierMessage = 'Choose only one meal type: breakfast, lunch, dinner or dessert.';
@@ -79,19 +61,12 @@ export function dirtyIngredientLines(draft: RecipeDraft, dirty: Record<string, s
     .filter(row => Object.hasOwn(dirty, row.id) && dirty[row.id].trim())
     .map(row => ({id: row.id, text: dirty[row.id]}));
 }
-export function applyIngredientLines(draft: RecipeDraft, snapshot: IngredientLineSnapshot,
-  items: {id: string; text: string; method: string; ingredient: Ingredient}[]): RecipeDraft {
-  if (items.length !== snapshot.length || new Set(items.map(item => item.id)).size !== snapshot.length ||
-    items.some((item, index) => item.id !== snapshot[index].id || item.text !== snapshot[index].text ||
-      item.ingredient.id !== item.id || item.ingredient.original_text !== item.text || item.ingredient.grams !== null ||
-      !['deterministic', 'llm', 'unparsed'].includes(item.method))) throw new Error('Ingredient preview did not match your text. Result ignored.');
-  const byId = new Map(items.map(item => [item.id, item]));
-  return {...draft, ingredient_groups: draft.ingredient_groups.map(group => ({...group, ingredients: group.ingredients.map(row => {
-    const item = byId.get(row.id);
-    if (!item) return row;
-    if (ingredientLine(row) !== item.text) throw new Error('Ingredient changed while organizing. Result ignored.');
-    return item.method === 'unparsed' ? changedIngredient(row, item.text) : {...item.ingredient};
-  })}))};
+export function applyIngredientLines(draft: RecipeDraft,
+  items: {id: string; ingredient: Ingredient}[]): RecipeDraft {
+  const byId = new Map(items.map(item => [item.id, item.ingredient]));
+  return {...draft, ingredient_groups: draft.ingredient_groups.map(group => ({...group, ingredients: group.ingredients.map(row =>
+    byId.get(row.id) ?? row
+  )}))};
 }
 export function withoutEmptyIngredients(draft: RecipeDraft): RecipeDraft {
   return {...draft, ingredient_groups: draft.ingredient_groups.map(group => ({...group,

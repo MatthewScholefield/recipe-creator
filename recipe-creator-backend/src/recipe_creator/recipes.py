@@ -269,9 +269,6 @@ def _draft_output(recipe):
     output["mode"] = "structured" if recipe.get("mode") == "structured" else "text"
     output["directions"] = recipe.get("directions", recipe.get("instructions", ""))
     output["ingredient_groups"] = _groups_output(recipe.get("ingredient_groups", []), recipe["id"])
-    gaps = output["unclassified"]
-    if isinstance(gaps, list):
-        output["unclassified"] = "".join(piece.get("text", "") for piece in gaps)
     if output["yield_amount"] is None and recipe.get("servings"):
         output["yield_amount"] = str(recipe["servings"])
     return output
@@ -534,7 +531,6 @@ async def parse(request: Request, body: ParseRequest):
         result = await ai.parse_recipe(body.source_text, request.app.state.settings)
         return {
             **result,
-            "source_text": body.source_text,
             "ingredient_groups": _groups_output(
                 result.get("ingredient_groups", []), ai.source_hash(body.source_text)
             ),

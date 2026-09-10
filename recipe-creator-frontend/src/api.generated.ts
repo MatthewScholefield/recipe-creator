@@ -739,9 +739,9 @@ export interface components {
             text: string;
             /**
              * Method
-             * @enum {string}
+             * @constant
              */
-            method: "deterministic" | "llm" | "unparsed";
+            method: "llm";
             ingredient: components["schemas"]["IngredientOutput"];
         };
         /** IngredientLinesRequest */
@@ -753,8 +753,6 @@ export interface components {
         IngredientLinesResult: {
             /** Items */
             items: components["schemas"]["IngredientLineResult"][];
-            /** Warnings */
-            warnings: string[];
         };
         /** IngredientOutput */
         IngredientOutput: {
@@ -847,10 +845,6 @@ export interface components {
         };
         /** ParseResult */
         ParseResult: {
-            /** Source Hash */
-            source_hash: string;
-            /** Source Text */
-            source_text: string;
             /** Description */
             description: string;
             /** Ingredient Groups */
@@ -859,10 +853,12 @@ export interface components {
             directions: string;
             /** Notes */
             notes: string;
-            /** Unclassified */
-            unclassified: string;
-            /** Warnings */
-            warnings: string[];
+            /** Yield Amount */
+            yield_amount: string | null;
+            /** Yield Unit */
+            yield_unit: string;
+            /** Source Url */
+            source_url: string;
         };
         /** ProfileInput */
         ProfileInput: {
@@ -917,11 +913,6 @@ export interface components {
             directions: string;
             /** Notes */
             notes: string;
-            /**
-             * Unclassified
-             * @default
-             */
-            unclassified: string;
             /** Tags */
             tags: string[];
             /** Yield Amount */
@@ -965,11 +956,6 @@ export interface components {
              * @default
              */
             notes: string;
-            /**
-             * Unclassified
-             * @default
-             */
-            unclassified: string;
             /** Tags */
             tags?: string[];
             /** Yield Amount */
@@ -1082,11 +1068,6 @@ export interface components {
              * @default
              */
             notes: string;
-            /**
-             * Unclassified
-             * @default
-             */
-            unclassified: string;
             /** Tags */
             tags?: string[];
             /** Yield Amount */

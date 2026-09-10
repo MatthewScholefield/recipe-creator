@@ -8,7 +8,7 @@ from pydantic_ai.messages import ModelResponse, ThinkingPart, ToolCallPart, User
 from pydantic_ai.models.function import DeltaToolCall, DeltaThinkingPart, FunctionModel
 from pydantic_ai.models.test import TestModel
 
-from recipe_creator.ai import ParseRequest, parse_recipe, parser_agent, source_hash
+from recipe_creator.ai import ParseRequest, parse_recipe, parser_agent
 from recipe_creator.settings import Settings
 
 
@@ -23,7 +23,22 @@ def output(**kwargs):
         "ingredient_groups": [],
         "directions": "",
         "notes": "",
-        "unclassified": "",
+        "yield_amount": None,
+        "yield_unit": "",
+        "source_url": "",
+        **kwargs,
+    }
+
+
+def ingredient(original_text, name, **kwargs):
+    return {
+        "original_text": original_text,
+        "quantity": None,
+        "quantity_max": None,
+        "unit": "",
+        "name": name,
+        "preparation": "",
+        "optional": False,
         **kwargs,
     }
 
@@ -53,11 +68,11 @@ def test_request_rejects_identity():
         ParseRequest(source_text="Recipe", display_name="private")
 
 
-async def test_reformatted_unicode_and_whitespace_are_direct_output():
+async def test_reformatted_recipe_fields_are_direct_output():
     source = (
-        "Café pancakes\r\nBatter:\r\n- ½ kg flour\r\n- 2 eggs\r\nSauce:\r\n"
-        "- 1 lemon\r\n1) Mix  gently.\r\n2) Bake at 180°C for 20 minutes.\r\n"
-        "Note: Keep cool.\r\n??? handwritten mark"
+        "Café pancakes\r\nMakes 4 servings\r\nhttps://example.com/pancakes\r\n"
+        "Batter:\r\n- ½ kg flour\r\n- 2 eggs\r\nSauce:\r\n- 1 lemon\r\n"
+        "1) Mix gently.\r\n2) Bake at 180°C for 20 minutes.\r\nNote: Keep cool."
     )
     expected = output(
         description="Café pancakes",
@@ -65,38 +80,26 @@ async def test_reformatted_unicode_and_whitespace_are_direct_output():
             {
                 "name": "Batter",
                 "ingredients": [
-                    {"original_text": "½ kg flour"},
-                    {"original_text": "2 eggs"},
+                    ingredient("½ kg flour", "flour", quantity="0.5", unit="kg"),
+                    ingredient("2 eggs", "eggs", quantity="2"),
                 ],
             },
             {
                 "name": "Sauce",
-                "ingredients": [{"original_text": "1 lemon"}],
+                "ingredients": [ingredient("1 lemon", "lemon", quantity="1")],
             },
         ],
         directions="Mix gently.\n\nBake at 180°C for 20 minutes.",
         notes="Keep cool.",
-        unclassified="??? handwritten mark",
+        yield_amount="4",
+        yield_unit="servings",
+        source_url="https://example.com/pancakes",
     )
     with parser_agent.override(model=TestModel(custom_output_args=expected)):
         data = await parse_recipe(source, Settings())
-    assert data["description"] == "Café pancakes"
-    assert data["ingredient_groups"] == expected["ingredient_groups"]
-    assert data["directions"] == expected["directions"]
-    assert data["notes"] == "Keep cool."
-    assert data["unclassified"] == "??? handwritten mark"
-    assert data["source_text"] == source
-    assert data["source_hash"] == source_hash(source)
-    assert data["warnings"] == ["unclassified_source"]
+    assert data == expected
 
 
-async def test_empty_unclassified_has_no_warning():
-    source = "Mix now."
-    expected = output(directions="Mix now.")
-    with parser_agent.override(model=TestModel(custom_output_args=expected)):
-        data = await parse_recipe(source, Settings())
-    assert data["unclassified"] == ""
-    assert data["warnings"] == []
 
 
 async def test_ingredient_batch_one_request_no_transport_retries(monkeypatch):
@@ -115,10 +118,10 @@ async def test_ingredient_batch_one_request_no_transport_retries(monkeypatch):
         payload = json.loads(next(p.content for m in messages for p in m.parts if isinstance(p, UserPromptPart)))
         assert payload == lines
         calls.append(1)
-        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'items': [{'id': 'legacy', 'unparsed': True}]})])
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'items': [{'id': 'legacy', **ingredient('2 cans tomatoes', 'tomatoes', quantity='2', unit='cans')}]})])
     with ai.ingredient_line_agent.override(model=FunctionModel(respond)):
         result = await ai.parse_ingredient_lines_batch(lines, Settings())
-    assert result.items[0].unparsed and calls == [1] and retries == [0]
+    assert result.items[0].name == "tomatoes" and calls == [1] and retries == [0]
     calls.clear()
     async def invalid(messages, info):
         calls.append(1)
@@ -140,11 +143,11 @@ async def test_ingredient_groups_require_labels_and_use_model_organization_direc
             ingredient_groups=[
                 {
                     "name": filling_name,
-                    "ingredients": [{"original_text": "2 apples"}],
+                    "ingredients": [ingredient("2 apples", "apples", quantity="2")],
                 },
                 {
                     "name": "Topping",
-                    "ingredients": [{"original_text": "1 cup oats"}],
+                    "ingredients": [ingredient("1 cup oats", "oats", quantity="1", unit="cup")],
                 },
             ],
         ))])
@@ -153,15 +156,15 @@ async def test_ingredient_groups_require_labels_and_use_model_organization_direc
         result = await parse_recipe(source, Settings())
     assert len(calls) == 2
     assert result["ingredient_groups"] == [
-        {"name": "Filling", "ingredients": [{"original_text": "2 apples"}]},
-        {"name": "Topping", "ingredients": [{"original_text": "1 cup oats"}]},
+        {"name": "Filling", "ingredients": [ingredient("2 apples", "apples", quantity="2")]},
+        {"name": "Topping", "ingredients": [ingredient("1 cup oats", "oats", quantity="1", unit="cup")]},
     ]
 
 
 async def test_single_group_label_is_returned():
     expected = output(ingredient_groups=[{
         "name": "Ingredients",
-        "ingredients": [{"original_text": "2 eggs"}],
+        "ingredients": [ingredient("2 eggs", "eggs", quantity="2")],
     }])
     with parser_agent.override(model=TestModel(custom_output_args=expected)):
         result = await parse_recipe("2 eggs", Settings())

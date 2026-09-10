@@ -39,11 +39,6 @@ it('does not navigate after a publishing editor is unmounted', async () => {
   expect(listDrafts().map(draft => draft.id)).toEqual([local.id]);
   expect(fetcher.mock.calls.filter(([url]) => url === '/api/recipes')).toHaveLength(1);
 });
-it('rejects parse output that echoes a different source', async () => {
-  mockApi(url => url === '/api/session' ? identity : {source_text:'Different',source_hash:'hash',description:'Changed',ingredient_groups:[],directions:'',notes:'',unclassified:'',warnings:[]});
-  render(Editor,{navigate:vi.fn()}); await startNewRecipe(); await fireEvent.input(await screen.findByLabelText('Paste or write your recipe'),{target:{value:'  Exact source\n'}}); await fireEvent.click(screen.getByRole('button',{name:'Organize'}));
-  expect(await screen.findByRole('alert')).toHaveTextContent('different source'); expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue('  Exact source\n');
-});
 it('recovers exact draft text and original revision before editing', async () => {
   localStorage.setItem('notebook:draft:r1',JSON.stringify({draft:{...blank(),title:'Recovered soup',source_text:'  exact draft\n\n'},revision:1,key:'retry-key',saved:new Date().toISOString()}));
   const fetcher = mockApi((url,init) => url === '/api/session' ? identity : recipe);
@@ -73,7 +68,7 @@ it('ignores a stale parse after typing and allows a text-only publish', async ()
   await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Soup'}}); await fireEvent.input(screen.getByLabelText('Paste or write your recipe'),{target:{value:'Original'}});
   await fireEvent.click(screen.getByRole('button',{name:'Organize'})); await waitFor(() => expect(resolveParse).toBeTypeOf('function'));
   await fireEvent.input(screen.getByLabelText('Paste or write your recipe'),{target:{value:'Changed while parsing'}});
-  resolveParse({source_text:'Original',source_hash:'hash',description:'Original',ingredient_groups:[],directions:'',notes:'',unclassified:'',warnings:[]});
+  resolveParse({description:'Original',ingredient_groups:[],directions:'',notes:'',yield_amount:null,yield_unit:'',source_url:''});
   expect(await screen.findByText(/Result ignored/)).toBeInTheDocument(); expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue('Changed while parsing');
   await fireEvent.click(screen.getByRole('button',{name:'Publish recipe'})); await waitFor(() => expect(navigate).toHaveBeenCalledWith('/recipes/saved'));
   const write = fetcher.mock.calls.find(([url]) => url === '/api/recipes'); expect(JSON.parse(write![1]!.body as string).mode).toBe('text'); expect(JSON.parse(write![1]!.body as string).source_text).toBe('Changed while parsing');

@@ -252,21 +252,28 @@ async def test_provenance_edit_invalidation_and_terminal_retry(app):
         assert (await app.state.repo.get("jobs", job["id"]))["attempts"] == 0
 
 
-async def test_parse_quota_exact_source_and_sanitized_failure(app, monkeypatch):
+async def test_parse_quota_recipe_fields_and_sanitized_failure(app, monkeypatch):
     calls = []
     async def parse(source, settings):
         calls.append(source)
         return {
-            "source_hash": ai.source_hash(source),
-            "source_text": source,
             "description": "",
             "directions": "",
             "notes": "",
+            "yield_amount": "4",
+            "yield_unit": "servings",
+            "source_url": "https://example.com/recipe",
             "ingredient_groups": [
-                {"name": "", "ingredients": [{"original_text": "2 eggs"}]}
+                {"name": "", "ingredients": [{
+                    "original_text": "2 eggs",
+                    "quantity": "2",
+                    "quantity_max": None,
+                    "unit": "",
+                    "name": "eggs",
+                    "preparation": "",
+                    "optional": False,
+                }]}
             ],
-            "unclassified": source,
-            "warnings": ["unclassified_source"],
         }
     monkeypatch.setattr(ai, "parse_recipe", parse)
     async with client(app) as browser:
@@ -276,10 +283,12 @@ async def test_parse_quota_exact_source_and_sanitized_failure(app, monkeypatch):
         source = "  source\r\n\n"
         result = await browser.post("/parse", json={"source_text": source})
         assert result.status_code == 200, result.text
-        assert result.json()["unclassified"] == source == result.json()["source_text"]
+        assert result.json()["yield_amount"] == "4"
+        assert result.json()["yield_unit"] == "servings"
+        assert result.json()["source_url"] == "https://example.com/recipe"
         group = result.json()["ingredient_groups"][0]
         assert group["name"] == ""
-        assert group["ingredients"][0]["original_text"] == "2 eggs"
+        assert group["ingredients"][0]["name"] == "eggs"
         assert group["ingredients"][0]["id"]
         assert len(await app.state.repo.list("usage")) == 3
         async def fail(source, settings):
@@ -353,17 +362,19 @@ async def test_selected_tags_lookup_privacy_and_complete_retrieval(app):
 
 async def test_anonymous_ingredient_quota_and_blocked_credentials(app, monkeypatch):
     from unittest.mock import AsyncMock
-    fallback = AsyncMock(return_value={'items': [{'id': 'old', 'unparsed': True}]})
+    fallback = AsyncMock(return_value=ai.IngredientBatchOutput(items=[
+        ai.ParsedIngredientLine(id='old', original_text='2 eggs', quantity='2', name='eggs')
+    ]))
     monkeypatch.setattr(ai, 'parse_ingredient_lines_batch', fallback)
     async with client(app) as browser:
         response = await browser.post('/ingredients/parse', json={'lines': [{'id': 'old', 'text': '2 eggs'}]})
-        assert response.status_code == 200 and response.json()['items'][0]['method'] == 'deterministic'
-        assert not await app.state.repo.list('usage') and not await app.state.repo.list('users')
-        app.state.settings.ai_global_daily_limit = 1
+        assert response.status_code == 200 and response.json()['items'][0]['method'] == 'llm'
+        assert len(await app.state.repo.list('usage')) == 1 and not await app.state.repo.list('users')
+        app.state.settings.ai_global_daily_limit = 2
         body = {'lines': [{'id': 'old', 'text': '2 cans beans'}]}
         results = await asyncio.gather(*(browser.post('/ingredients/parse', json=body, headers={'X-Forwarded-For': f'forged-{i}'}) for i in range(3)))
         assert sorted(response.status_code for response in results) == [200, 429, 429]
-        assert fallback.await_count == 1
+        assert fallback.await_count == 2
         user = await identify(app, browser)
         await app.state.repo.update('users', user['id'], {'state': 'blocked'})
         assert (await browser.post('/ingredients/parse', json=body)).status_code == 403

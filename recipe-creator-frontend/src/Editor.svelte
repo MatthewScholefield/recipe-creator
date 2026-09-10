@@ -20,28 +20,17 @@
   const storageKey = untrack(() => `draft:${recipeId || 'new'}`);
   const helpId = `publish-help-${crypto.randomUUID()}`;
   const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
-  const WARNING_MESSAGES: Record<string, string> = {
-    unclassified_source: 'Some original text could not be placed in a recipe section. Review “Other original text” to make sure it is in the right place.',
-    ingredient_fallback_invalid: 'The organizer could not reliably read some ingredient quantities. Those ingredients were kept exactly as written.',
-    ingredient_fallback_unavailable: 'Ingredient organization was temporarily unavailable. The affected ingredients were kept exactly as written.'
-  };
-  const warningMessage = (warning: string): string => WARNING_MESSAGES[warning] ||
-    'The organizer could not fully organize this recipe. Review the result before saving.';
   let draft = $state<RecipeDraft>(blank('text')), revision = $state<number>(), undo = $state<RecipeDraft>();
   let dirty = $state<Record<string, string>>({}), undoLines = $state<Record<string, string>>({});
   let ready = $state(false), allowed = $state(untrack(() => !recipeId)), busy = $state(false), parsing = $state(false);
   let error = $state(''), notice = $state(''), persisted = $state(''), conflict = $state(false), external = $state(false);
   let activeId = $state(''), draftName = $state(''), naming = $state(false), textChoice = $state(false), discard = $state(false);
   let drafts = $state<DraftSummary[]>([]), legacyAvailable = $state(false), recovered = $state<LegacyDraft | null>(null);
-  let warnings = $state<string[]>([]), tags = $state<string[]>([...MEAL_CLASSIFIERS]), tagsError = $state(''), originalOption = $state(false);
+  let tags = $state<string[]>([...MEAL_CLASSIFIERS]), tagsError = $state('');
   let publishKey: string = crypto.randomUUID(), baseline = '', lastSaved: string | null = null, alive = true, writing = false;
-  const unresolvedLines = (value?: RecipeDraft): Record<string, string> => Object.fromEntries((value?.ingredient_groups || [])
-    .flatMap(group => group.ingredients).filter(row => row.original_text.trim() && !row.name && row.quantity === null && row.quantity_max === null)
-    .map(row => [row.id, row.original_text]));
   const guard = new ParseGuard(), lifetime = new AbortController();
   const inputs = new Map<string, HTMLInputElement>();
   let hasIdentity = $derived(appState.identity?.user?.state === 'active');
-  let unorganizedIngredients = $derived(originalOption ? dirtyIngredientLines(draft, dirty).map(line => line.text) : []);
   let validation = $derived(tagError(draft.tags));
   let editing = $derived(!!recipeId || !!activeId);
   let submitHelp = $derived(!hasIdentity ? `Set your name to ${recipeId ? 'save changes' : 'publish'}` :
@@ -51,8 +40,8 @@
   function resume(value: LocalDraft) {
     guard.cancel(); parsing = false; busy = false;
     activeId = value.id; draftName = value.name; draft = copy(value.draft); undo = value.undo ? copy(value.undo) : undefined;
-    dirty = copy(value.ingredientLines || {}); undoLines = unresolvedLines(undo); publishKey = value.publishKey;
-    baseline = JSON.stringify(draft); lastSaved = JSON.stringify(readDraft(value.id)); external = false; error = ''; originalOption = false;
+    dirty = copy(value.ingredientLines || {}); undoLines = {}; publishKey = value.publishKey;
+    baseline = JSON.stringify(draft); lastSaved = JSON.stringify(readDraft(value.id)); external = false; error = '';
   }
   function flush() {
     if (!ready || !allowed || !editing || recovered || external) return false;
@@ -95,7 +84,7 @@
   function restoreEdit() {
     if (!recovered) return;
     draft = copy(recovered.draft); revision = recovered.revision; publishKey = recovered.key;
-    undo = recovered.undo ? copy(recovered.undo) : undefined; undoLines = unresolvedLines(undo); dirty = copy(recovered.ingredientLines || {}); recovered = null;
+    undo = recovered.undo ? copy(recovered.undo) : undefined; undoLines = {}; dirty = copy(recovered.ingredientLines || {}); recovered = null;
     notice = 'Recovered local draft. Saving checks its original revision.';
   }
   async function fetchTags() {
@@ -140,7 +129,6 @@
   function cancelWork() { guard.cancel(); parsing = false; busy = false; }
   function changed() {
     if (parsing) { cancelWork(); notice = 'Recipe changed while organizing. Result ignored; organize again when ready.'; }
-    originalOption = false;
   }
   function cancelParse() { cancelWork(); notice = 'Organization cancelled. Your text is retained.'; }
   function setLine(group: IngredientGroup, index: number, text: string) {
@@ -161,70 +149,54 @@
   function bindInput(node: HTMLInputElement, rowId: string) { inputs.set(rowId, node); return {destroy() { inputs.delete(rowId); }}; }
   function undoOrganization() {
     if (!undo) return;
-    cancelWork(); draft = copy(undo); dirty = copy(undoLines); undo = undefined; undoLines = {}; textChoice = false; originalOption = false;
+    cancelWork(); draft = copy(undo); dirty = copy(undoLines); undo = undefined; undoLines = {}; textChoice = false;
   }
   function editText(formatted: boolean) {
     cancelWork(); undo = copy(draft); undoLines = copy(dirty);
     draft = {...draft, mode: 'text', source_text: formatted ? formatRecipe(draft) : draft.source_text}; textChoice = false;
   }
-  async function previewLines(version: number, signal: AbortSignal): Promise<boolean> {
+  async function previewLines(version: number, signal: AbortSignal): Promise<void> {
     const snapshot = copy(draft), serialized = JSON.stringify(snapshot), lines = dirtyIngredientLines(snapshot, dirty);
-    if (!lines.length) return true;
+    if (!lines.length) return;
     const result = await mutate<IngredientLinesResult>('/ingredients/parse', {lines}, 'POST', signal);
-    if (!alive || !guard.accepts(version) || JSON.stringify(draft) !== serialized) return false;
-    draft = applyIngredientLines(snapshot, lines, result.items.map(item => ({...item, ingredient: {...item.ingredient,
+    if (!alive || !guard.accepts(version) || JSON.stringify(draft) !== serialized) return;
+    draft = applyIngredientLines(snapshot, result.items.map(item => ({...item, ingredient: {...item.ingredient,
       quantity: item.ingredient.quantity ?? null, quantity_max: item.ingredient.quantity_max ?? null, grams: item.ingredient.grams ?? null}})));
     const remaining = {...dirty};
-    for (const item of result.items) if (item.method !== 'unparsed') delete remaining[item.id];
-    dirty = remaining; warnings = [...warnings, ...result.warnings];
-    originalOption = result.items.some(item => item.method === 'unparsed');
-    if (originalOption) notice = '';
-    return !originalOption;
+    for (const item of result.items) delete remaining[item.id];
+    dirty = remaining;
   }
   async function organizeIngredients() {
     if (busy || parsing) return;
-    error = ''; notice = ''; warnings = []; const {version, signal} = guard.start(); parsing = true;
+    error = ''; notice = ''; const {version, signal} = guard.start(); parsing = true;
     try { await previewLines(version, signal); }
-    catch (e) { if (guard.accepts(version)) { error = message(e); originalOption = true; } }
+    catch (e) { if (guard.accepts(version)) error = message(e); }
     finally { if (guard.accepts(version)) parsing = false; }
   }
   async function organize() {
     if (busy || parsing || !draft.source_text.trim()) return;
-    error = ''; warnings = []; const snapshot = copy(draft), serialized = JSON.stringify(snapshot);
+    error = ''; const snapshot = copy(draft), serialized = JSON.stringify(snapshot);
     const {version, signal} = guard.start(); parsing = true;
     try {
       const result = await mutate<ParseResult>('/parse', {source_text: snapshot.source_text}, 'POST', signal);
       if (!alive || !guard.accepts(version) || JSON.stringify(draft) !== serialized) return;
-      if (result.source_text !== snapshot.source_text) throw new Error('The organizer returned a different source. Result ignored.');
-      undo = snapshot; undoLines = copy(dirty); draft = applyParse(snapshot, result); warnings = result.warnings || [];
-      // Existing exact rows retain their legacy metadata. Only newly classified lines need interpretation.
-      const oldRows = snapshot.ingredient_groups.flatMap(group => group.ingredients);
-      const next = {...dirty};
-      draft.ingredient_groups = draft.ingredient_groups.map(group => ({...group, ingredients: group.ingredients.map(row => {
-        if (oldRows.some(old => old.id === row.id && ingredientLine(old) === ingredientLine(row))) return row;
-        const text = ingredientLine(row); next[row.id] = text; return changedIngredient(row, text);
-      })}));
-      dirty = next; notice = 'Organized for review. Your original text is retained.';
-      try { await previewLines(version, signal); }
-      catch (e) { if (guard.accepts(version)) { error = `${message(e)} Ingredient text is retained; quantities are unresolved.`; originalOption = true; } }
+      undo = snapshot; undoLines = copy(dirty); draft = applyParse(snapshot, result); dirty = {};
     } catch (e) { if (guard.accepts(version)) error = `${message(e)} Your text is safe; publish as written or try again.`; }
     finally { if (guard.accepts(version)) parsing = false; }
   }
-  async function publish(original = false) {
+  async function publish() {
     if (submitDisabled) return;
     error = ''; conflict = false;
     if (draft.source_url && !safeUrl(draft.source_url)) { error = 'The source link must begin with http:// or https://.'; return; }
     flush(); if (external) return;
     const {version, signal} = guard.start(); busy = true;
     try {
-      if (draft.mode === 'structured' && !original) {
-        if (originalOption) { notice = 'Review unresolved lines or choose Save with original ingredient text.'; return; }
-        try { if (!await previewLines(version, signal)) return; }
-        catch (e) { if (guard.accepts(version)) { error = message(e); originalOption = true; } return; }
+      if (draft.mode === 'structured') {
+        try { await previewLines(version, signal); }
+        catch (e) { if (guard.accepts(version)) error = message(e); return; }
       }
       if (!alive || !guard.accepts(version) || !hasIdentity) return;
       let snapshot = copy(draft);
-      if (original) snapshot.ingredient_groups = snapshot.ingredient_groups.map(group => ({...group, ingredients: group.ingredients.map(row => Object.hasOwn(dirty, row.id) ? changedIngredient(row, dirty[row.id]) : row)}));
       snapshot = withoutEmptyIngredients(snapshot); snapshot.tags = normalizeTags(snapshot.tags);
       const payload = Object.fromEntries(Object.keys(blank()).map(key => [key, snapshot[key as keyof RecipeDraft]]));
       const result = await mutate<Recipe>(recipeId ? `/recipes/${id(recipeId)}` : '/recipes', {...payload, ...(recipeId ? {expected_revision: revision} : {})}, recipeId ? 'PUT' : 'POST', signal, recipeId ? undefined : publishKey);
@@ -301,7 +273,6 @@
           {/each}
           <div class="toolbar"><button type="button" class="ghost" onclick={() => {changed(); draft.ingredient_groups = [...draft.ingredient_groups, {id: crypto.randomUUID(), name: '', ingredients: [ingredient()]}];}}><Icon name="plus" size={16} />Add section</button><button type="button" disabled={parsing || !dirtyIngredientLines(draft, dirty).length} onclick={organizeIngredients}>Organize ingredients</button></div>
           <label>Directions<textarea rows="10" bind:value={draft.directions}></textarea></label><label>Notes<textarea rows="5" bind:value={draft.notes}></textarea></label>
-          {#if draft.unclassified}<label>Other original text<textarea rows="5" bind:value={draft.unclassified}></textarea></label>{/if}
         {/if}
         {#if undo}<button type="button" class="ghost" onclick={undoOrganization}>Undo organization</button>{/if}
         <TagPicker {tags} bind:selected={draft.tags} onchange={(values) => {changed(); draft.tags = normalizeTags(values);}} allowCreate={true} />
@@ -315,12 +286,6 @@
       </fieldset>
       {#if parsing}<div class="toolbar"><Spinner label="Organizing…" /><button type="button" onclick={cancelParse}>Cancel organizing</button></div>{/if}
       {#if busy}<div class="toolbar"><Spinner label="Saving recipe…" /><button type="button" onclick={() => {cancelWork(); notice = 'Save cancelled. Your draft is retained; retry uses the same publishing key.';}}>Cancel saving</button></div>{/if}
-      {#each warnings as warning}<p class="notice">{warningMessage(warning)}</p>{/each}
-      {#if unorganizedIngredients.length}<section class="notice" role="status" aria-labelledby="unorganized-ingredients-heading">
-        <h2 id="unorganized-ingredients-heading">Ingredients kept as written</h2>
-        <p>These ingredients could not be organized. Make sure that’s okay before saving:</p>
-        <ul>{#each unorganizedIngredients as line}<li>{line}</li>{/each}</ul>
-      </section>{/if}
       {#if notice}<p role="status" class="notice">{notice}</p>{/if}
       <p class="help" role="status">{persisted}</p>
       {#if !hasIdentity}<IdentityPrompt onready={(value) => {appState.identity = value; notice = 'Name set. Review your recipe, then publish.';}} />{/if}
@@ -328,7 +293,6 @@
       <!-- The focusable group exposes help for the disabled child button. -->
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <Tooltip text={submitHelp}><span class="submit-wrapper" role="group" tabindex={submitDisabled ? 0 : -1} aria-label={submitHelp} aria-describedby={helpId}><button class="primary" type="submit" disabled={submitDisabled} aria-describedby={helpId}>{recipeId ? 'Save changes' : 'Publish recipe'}</button></span></Tooltip>
-      {#if originalOption}<button type="button" disabled={submitDisabled} onclick={() => publish(true)}>Save with original ingredient text</button>{/if}
     </form>
   {/if}
 {/if}

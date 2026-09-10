@@ -15,11 +15,11 @@ describe('generated API contract', () => {
   });
 });
 describe('lossless recipe representations', () => {
-  it('embeds exact prose and preserves unnamed and duplicate sections', () => {
-    const draft = {...blank('structured'), description: '  A family favorite.\n', directions: 'Heat to 180°C.\n\n  Wait 20 minutes.\n', notes: '  Never change this.\n', unclassified: 'Mystery paragraph'};
+  it('embeds exact recipe prose and preserves unnamed and duplicate sections', () => {
+    const draft = {...blank('structured'), description: '  A family favorite.\n', directions: 'Heat to 180°C.\n\n  Wait 20 minutes.\n', notes: '  Never change this.\n'};
     draft.ingredient_groups = ['', 'Sauce', 'Sauce'].map((name, i) => ({id: String(i), name, ingredients: [{...ingredient(), original_text: 'salt, to taste'}]}));
     const text = formatRecipe(draft);
-    expect(text).toContain(draft.description); expect(text).toContain(draft.directions); expect(text).toContain(draft.notes); expect(text).toContain(draft.unclassified);
+    expect(text).toContain(draft.description); expect(text).toContain(draft.directions); expect(text).toContain(draft.notes);
     expect(text.match(/=== Sauce ===/g)).toHaveLength(2); expect(text.match(/salt, to taste/g)).toHaveLength(3);
   });
   it('keeps a lone section label in data but omits it from formatted display text', () => {
@@ -27,10 +27,10 @@ describe('lossless recipe representations', () => {
     expect(draft.ingredient_groups[0].name).toBe('Ingredients');
     expect(formatRecipe(draft)).toBe('Ingredients\n2 eggs');
   });
-  it('retains the original source and unknown regions on parse', () => {
-    const draft = {...blank(), source_text: 'Original source\n  '};
-    const result = applyParse(draft, {source_hash:'hash', source_text:draft.source_text, description:'', ingredient_groups:[], directions:'exact', notes:' note ', unclassified:'unknown', warnings:[]});
-    expect(result).not.toHaveProperty('source_hash'); expect(result).not.toHaveProperty('warnings'); expect(result.source_text).toBe(draft.source_text); expect(result.notes).toBe(' note '); expect(result.unclassified).toBe('unknown');
+  it('retains the original source and applies every organized recipe field', () => {
+    const draft = {...blank(), source_text: 'Original source\n  ', description: 'old', yield_amount: '2', source_url: 'https://old.example'};
+    const result = applyParse(draft, {description:'new', ingredient_groups:[], directions:'exact', notes:' note ', yield_amount:'4', yield_unit:'servings', source_url:'https://example.com'});
+    expect(result.source_text).toBe(draft.source_text); expect(result).toMatchObject({description:'new',directions:'exact',notes:' note ',yield_amount:'4',yield_unit:'servings',source_url:'https://example.com'});
   });
   it('invalidates cancelled and superseded parses', () => {const guard = new ParseGuard(); const first = guard.start(); expect(guard.accepts(first.version)).toBe(true); const next = guard.start(); expect(first.signal.aborted).toBe(true); expect(guard.accepts(first.version)).toBe(false); expect(guard.accepts(next.version)).toBe(true); guard.cancel(); expect(guard.accepts(next.version)).toBe(false);});
   it('supports keyboard reorder without changing content', () => {expect(move(['a','b','c'], 1, -1)).toEqual(['b','a','c']); expect(move(['a'],0,-1)).toEqual(['a']);});
@@ -46,42 +46,28 @@ describe('ingredient line editing', () => {
     expect(ingredientLine(old)).toBe('  ½ cup flour ');
     expect(changedIngredient(old, '2 eggs')).toMatchObject({id:old.id, original_text:'2 eggs', quantity:null, quantity_max:null, grams:null, name:'', unit:'', preparation:'', optional:false});
   });
-  it('batches dirty lines only and preserves untouched metadata and blank filtering', () => {
-    const row = changedIngredient(ingredient(), '2 eggs');
+  it('batches dirty lines only and applies the model result directly', () => {
+    const row = changedIngredient(ingredient(), 'eggs 2');
     const draft = {...blank('structured'), ingredient_groups:[{id:'legacy-group', name:'', ingredients:[old, row, ingredient()]}]};
-    const snapshot = dirtyIngredientLines(draft, {[row.id]:'2 eggs'});
-    expect(snapshot).toEqual([{id:row.id, text:'2 eggs'}]);
-    const result = applyIngredientLines(draft, snapshot, [{...snapshot[0], method:'deterministic', ingredient:{...row, quantity:'2', name:'eggs'}}]);
+    const snapshot = dirtyIngredientLines(draft, {[row.id]:'eggs 2'});
+    expect(snapshot).toEqual([{id:row.id, text:'eggs 2'}]);
+    const organized = {...row, original_text:'2 eggs', quantity:'2', name:'eggs'};
+    const result = applyIngredientLines(draft, [{id:row.id, ingredient:organized}]);
     expect(result.ingredient_groups[0].ingredients[0]).toBe(old);
+    expect(result.ingredient_groups[0].ingredients[1]).toEqual(organized);
     expect(withoutEmptyIngredients(result).ingredient_groups[0].ingredients).toHaveLength(2);
-    expect(() => applyIngredientLines(draft, snapshot, [{...snapshot[0], text:'changed', method:'llm', ingredient:row}])).toThrow(/did not match/);
   });
-  it('retains matching legacy IDs but never restores ingredients omitted by the organizer', () => {
+  it('uses organized ingredients without restoring omitted source rows', () => {
     const divider = {...ingredient(), id:'divider', original_text:'=== section ==='};
-    const draft = {...blank(), description:' authored ', directions:'Do not rewrite', notes:' notes ', unclassified:'odd',
+    const draft = {...blank(), description:' authored ', directions:'Do not rewrite', notes:' notes ',
       ingredient_groups:[{id:'legacy-group',name:'Dough',ingredients:[old, divider]}]};
-    const result = applyParse(draft, {source_hash:'hash', source_text:'', description:'model', directions:'model', notes:'model', unclassified:'model',
-      ingredient_groups:[{id:'new-group',name:'Dough',ingredients:[{...old,id:'new-row'}]}],warnings:[]});
-    expect(result.ingredient_groups[0].id).toBe('legacy-group');
-    expect(result.ingredient_groups[0].ingredients).toEqual([old]);
-    expect(result).toMatchObject({description:draft.description,directions:draft.directions,notes:draft.notes,unclassified:draft.unclassified});
-    const empty = applyParse(draft, {source_hash:'hash',source_text:'',description:'',directions:'',notes:'',unclassified:'',ingredient_groups:[],warnings:[]});
+    const result = applyParse(draft, {description:'model', directions:'model', notes:'model', yield_amount:null, yield_unit:'', source_url:'',
+      ingredient_groups:[{id:'new-group',name:'Dough',ingredients:[{...old,id:'new-row'}]}]});
+    expect(result.ingredient_groups[0].id).toBe('new-group');
+    expect(result.ingredient_groups[0].ingredients).toEqual([{...old,id:'new-row'}]);
+    expect(result).toMatchObject({description:'model',directions:'model',notes:'model'});
+    const empty = applyParse(draft, {description:'',directions:'',notes:'',yield_amount:null,yield_unit:'',source_url:'',ingredient_groups:[]});
     expect(empty.ingredient_groups).toEqual([]);
-  });
-  it('repairs duplicate parser IDs without dropping ingredient rows', () => {
-    const draft = {...blank(), source_text: 'raw'};
-    const result = applyParse(draft, {
-      source_hash: 'hash', source_text: 'raw', description: '', directions: '', notes: '', unclassified: '', warnings: [],
-      ingredient_groups: [
-        {id: 'same-group', name: '', ingredients: [{id: 'same-row', original_text: '2 eggs', quantity: null, quantity_max: null, unit: '', name: '', preparation: '', optional: false, grams: null}]},
-        {id: 'same-group', name: '', ingredients: [{id: 'same-row', original_text: 'salt', quantity: null, quantity_max: null, unit: '', name: '', preparation: '', optional: false, grams: null}]},
-      ],
-    });
-    const groups = result.ingredient_groups;
-    const rows = groups.flatMap(group => group.ingredients);
-    expect(new Set(groups.map(group => group.id)).size).toBe(groups.length);
-    expect(new Set(rows.map(row => row.id)).size).toBe(rows.length);
-    expect(rows.map(row => row.original_text)).toEqual(['2 eggs', 'salt']);
   });
 });
 describe('editor tag validation', () => {

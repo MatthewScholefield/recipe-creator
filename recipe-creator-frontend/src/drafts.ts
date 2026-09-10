@@ -24,7 +24,6 @@ const nameOf = (name = '') => name.trim().slice(0, 120) || 'Untitled recipe';
 export function isRecipeDraft(value: unknown): value is RecipeDraft {
   if (!object(value) || !['text', 'structured'].includes(String(value.mode))) return false;
   if (!['title', 'source_text', 'description', 'directions', 'notes', 'yield_unit', 'source_url', 'modifications'].every(key => text(value[key]))) return false;
-  if (value.unclassified !== undefined && !text(value.unclassified)) return false;
   if (value.yield_amount !== null && !text(value.yield_amount)) return false;
   if (!Array.isArray(value.tags) || !value.tags.every(text) || !Array.isArray(value.ingredient_groups)) return false;
   const groupIds = new Set<string>(), rowIds = new Set<string>();
