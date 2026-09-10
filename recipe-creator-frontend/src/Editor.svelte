@@ -250,7 +250,7 @@
     {#if recovered}
       <section class="draft-recovery card draft" aria-labelledby="restore-draft-heading">
         <h2 id="restore-draft-heading">Restore draft?</h2>
-        <p class="draft-recovery-description">“{recovered.draft.title.trim() || 'Untitled recipe'}”</p>
+        <p class="draft-recovery-description">{recovered.draft.title.trim() || 'Untitled recipe'}</p>
         <PhotoDate createdAt={recovered.saved} label="You edited" />
         <div class="toolbar"><Button variant="primary" onclick={restoreEdit}><Icon name="edit" size={16} />Edit draft</Button><Button variant="danger" onclick={discardRecoveredDraft}><Icon name="trash" size={16} />Discard draft</Button></div>
       </section>

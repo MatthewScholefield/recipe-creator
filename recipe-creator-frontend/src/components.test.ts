@@ -44,7 +44,7 @@ it('shows a recovered edit as a card and removes it after submission', async () 
   const fetcher = mockApi((url,init) => url === '/api/session' ? identity : recipe);
   render(Editor,{recipeId:'r1',navigate:vi.fn()});
   expect(await screen.findByRole('heading',{name:'Restore draft?'})).toBeInTheDocument();
-  expect(screen.getByText('“Recovered soup”')).toBeInTheDocument();
+  expect(screen.getByText('Recovered soup')).toBeInTheDocument();
   expect(screen.getByText('You edited')).toBeInTheDocument();
   expect(screen.queryByLabelText('Recipe title')).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Edit draft'}));
