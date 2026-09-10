@@ -119,12 +119,12 @@ it('scales only ingredients and exposes originals on the grams amount, including
   const controls = screen.getByRole('button',{name:'Adjust ingredient scale'});
   expect(controls).toHaveAttribute('aria-expanded','false');
   await fireEvent.click(controls); expect(controls).toHaveAttribute('aria-expanded','true');
-  await fireEvent.click(screen.getByRole('button',{name:'2×'}));
+  await fireEvent.click(screen.getByRole('tab',{name:'2×'}));
   expect(screen.getByText('1 cup stock')).toBeInTheDocument();
   expect(screen.getByText('Simmer 20 minutes at 180°C.')).toBeInTheDocument();
   expect(screen.queryByText('Original & weight details')).not.toBeInTheDocument();
   expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
-  await fireEvent.click(screen.getByRole('button',{name:'Grams'}));
+  await fireEvent.click(screen.getByRole('tab',{name:'Grams'}));
   const amount = screen.getByRole('button',{name:'240 g'});
   const trigger = amount.closest('.tooltip-wrap')!;
   amount.focus(); expect(amount).toHaveFocus();
@@ -132,7 +132,7 @@ it('scales only ingredients and exposes originals on the grams amount, including
   expect(await screen.findByRole('tooltip')).toHaveTextContent('As written: ½ cup stock');
   await fireEvent.focusOut(trigger); expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   expect(screen.getByText('Simmer 20 minutes at 180°C.')).toBeInTheDocument();
-  await fireEvent.click(screen.getByRole('button',{name:'Original units'}));
+  await fireEvent.click(screen.getByRole('tab',{name:'Original'}));
   expect(screen.getByText('1 cup stock')).toBeInTheDocument();
   expect(screen.queryByText('240 g')).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Save for later'}));

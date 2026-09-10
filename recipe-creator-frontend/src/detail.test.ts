@@ -59,7 +59,10 @@ it('shows one gram amount and puts the original amount in its tooltip', async ()
   mockApi(); render(Detail,{recipeId:'r1',navigate:vi.fn()}); await screen.findByRole('heading',{name:'Soup'});
   expect(screen.queryByText('Original & weight details')).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Adjust ingredient scale'}));
-  await fireEvent.click(screen.getByRole('button',{name:'Grams'}));
+  expect(screen.getByRole('menu',{name:'Ingredient settings'})).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Adjust ingredient scale'}).querySelector('.lucide-settings')).toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Reset checks'})).not.toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('tab',{name:'Grams'}));
   const grams = screen.getByText('120 g'); await fireEvent.mouseEnter(grams.parentElement!);
   expect(await screen.findByRole('tooltip')).toHaveTextContent('As written: 1 cup flour Weight: 120 g');
 });
@@ -97,6 +100,7 @@ it('keeps detail, fallback, scaling, and authored text consistent', async () => 
   expect(screen.getByText('0.6 cup starch')).toBeInTheDocument();
 
   await fireEvent.click(screen.getByRole('button',{name:'Adjust ingredient scale'}));
+  await fireEvent.click(screen.getByRole('tab',{name:'Custom'}));
   await fireEvent.input(screen.getByLabelText('Custom multiplier'),{target:{value:'3'}});
   expect(screen.getByText('1 ½ cup flour')).toBeInTheDocument();
   expect(screen.getByText('1.8 cup sugar')).toBeInTheDocument();
@@ -104,7 +108,7 @@ it('keeps detail, fallback, scaling, and authored text consistent', async () => 
   expect(screen.getByText('1.5 g yeast')).toBeInTheDocument();
   expect(screen.getByText('¾–2 ¼ tablespoons oil')).toBeInTheDocument();
 
-  await fireEvent.click(screen.getByRole('button',{name:'Grams'}));
+  await fireEvent.click(screen.getByRole('tab',{name:'Grams'}));
   const weight = screen.getByRole('button',{name:'180 g'});
   await fireEvent.focusIn(weight);
   expect(await screen.findByRole('tooltip')).toHaveTextContent(
@@ -123,10 +127,10 @@ it('flags unscalable ingredients and explains unavailable gram conversions', asy
   mockApi(unavailable); const view = render(Detail,{recipeId:'r1',navigate:vi.fn()});
   await screen.findByRole('heading',{name:'Soup'});
   await fireEvent.click(screen.getByRole('button',{name:'Adjust ingredient scale'}));
-  await fireEvent.click(screen.getByRole('button',{name:'2×'}));
+  await fireEvent.click(screen.getByRole('tab',{name:'2×'}));
   expect(view.container.querySelector('.scale-badge')).toHaveTextContent('2×');
   expect(screen.getByText('⅗ cup tapioca starch/flour, plus more for sprinkling')).toBeInTheDocument();
-  await fireEvent.click(screen.getByRole('button',{name:'Grams'}));
+  await fireEvent.click(screen.getByRole('tab',{name:'Grams'}));
   const amount = screen.getByRole('button',{name:'2 cup'});
   expect(amount).toHaveClass('unavailable');
   await fireEvent.mouseEnter(amount.closest('.tooltip-wrap')!);
@@ -143,7 +147,7 @@ it('shows a recommended gram estimate with uncertainty and details in its toolti
   mockApi(ranged); render(Detail,{recipeId:'r1',navigate:vi.fn()}); await screen.findByRole('heading',{name:'Soup'});
   expect(screen.getByRole('button',{name:'Recalculate weight estimates'})).toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Adjust ingredient scale'}));
-  await fireEvent.click(screen.getByRole('button',{name:'Grams'}));
+  await fireEvent.click(screen.getByRole('tab',{name:'Grams'}));
   const grams = screen.getByRole('button',{name:'120 g'});
   await fireEvent.focusIn(grams);
   const tooltip = await screen.findByRole('tooltip');

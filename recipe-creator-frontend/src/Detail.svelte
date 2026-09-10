@@ -12,11 +12,12 @@
   import Spinner from './ui/Spinner.svelte';
   import Tooltip from './ui/Tooltip.svelte';
   import BackLink from './ui/BackLink.svelte';
-
+  import Dropdown from './ui/Dropdown.svelte';
+  import SegmentedTabs from './ui/SegmentedTabs.svelte';
   let { recipeId, navigate }: { recipeId: string; navigate: (path: string) => void } = $props();
-  let recipe = $state<Recipe>(), error = $state(''), status = $state(''), scale = $state(1), grams = $state(load('grams', false));
+  let recipe = $state<Recipe>(), error = $state(''), status = $state(''), scale = $state(1), scaleMode = $state<'preset' | 'custom'>('preset'), grams = $state(load('grams', false));
   let checked = $state<string[]>(untrack(() => load(`checked:${recipeId}`, []))), bookmarks = $state<string[]>(load('bookmarks', []));
-  let awake = $state(false), deleting = $state(false), deleteOpen = $state(false), controlsOpen = $state(false), weightsBusy = $state(false);
+  let awake = $state(false), deleting = $state(false), deleteOpen = $state(false), weightsBusy = $state(false);
   let lock: WakeLockSentinel | undefined;
   let alive = true;
   const lifetime = new AbortController();
@@ -109,11 +110,25 @@
 <div class="prose recipe-body">{recipe.source_text}</div>{#if recipe.can_edit}<Button variant="secondary" size="sm" href={`/recipes/${id(recipe.id)}/edit`} onclick={openEditor}><Icon name="edit" size={16} />Organize ingredients</Button>{/if}
 {:else}
 <section class="cooking-controls no-print" aria-label="Cooking controls">
-  <div class="controls-heading"><h2>Ingredients</h2><Tooltip text="Adjust servings and units"><button class="small-control" aria-label="Adjust ingredient scale" aria-expanded={controlsOpen} onclick={() => controlsOpen = !controlsOpen}><Icon name="edit" label="Adjust ingredient scale" /></button></Tooltip></div>
-  {#if controlsOpen}<div class="scale-panel">
-    <div class="toolbar"><span>Scale</span>{#each [0.5,1,2] as preset}<button class="small-control" class:selected={factor === preset} aria-pressed={factor === preset} onclick={() => scale = preset}>{preset}×</button>{/each}<label>Custom multiplier<input type="number" min="0.01" max="1000" step="any" bind:value={scale}></label>{#if quantity(recipe.yield_amount)}<label>Servings<input type="number" min="0.01" step="any" value={quantity(recipe.yield_amount)! * factor} onchange={(event) => {const value = Number(event.currentTarget.value); if (value > 0) scale = value / quantity(recipe!.yield_amount)!;}}></label>{/if}</div>
-    <div class="toolbar"><button class="small-control" class:selected={!grams} aria-pressed={!grams} onclick={() => grams = false}>Original units</button><button class="small-control" class:selected={grams} aria-pressed={grams} onclick={() => grams = true}>Grams</button><Button variant="ghost" size="sm" onclick={() => checked = []}>Reset checks</Button></div>
-  </div>{/if}
+  <div class="controls-heading"><h2>Ingredients</h2>
+    <Dropdown label="Ingredient settings" closeOnSelect={false}>
+      {#snippet trigger(open)}
+        <button class="small-control" type="button" title="Adjust servings and units" aria-label="Adjust ingredient scale" aria-haspopup="menu" aria-expanded={open}><Icon name="settings" label="Adjust ingredient scale" /></button>
+      {/snippet}
+      <div class="ingredient-settings">
+        <div class="settings-group">
+          <span class="settings-label">Scale</span>
+          <SegmentedTabs ariaLabel="Scale" options={[{value:'1',label:'1×'},{value:'2',label:'2×'},{value:'3',label:'3×'},{value:'custom',label:'Custom'}]} value={scaleMode === 'custom' ? 'custom' : String(factor)} onchange={(value) => { if (value === 'custom') scaleMode = 'custom'; else { scaleMode = 'preset'; scale = Number(value); } }} />
+          {#if scaleMode === 'custom'}<label>Custom multiplier<input type="number" min="0.01" max="1000" step="any" bind:value={scale}></label>{/if}
+          {#if quantity(recipe.yield_amount)}<label>Servings<input type="number" min="0.01" step="any" value={quantity(recipe.yield_amount)! * factor} onchange={(event) => {const value = Number(event.currentTarget.value); if (value > 0) { scaleMode = 'custom'; scale = value / quantity(recipe!.yield_amount)!; }}}></label>{/if}
+        </div>
+        <div class="settings-group">
+          <span class="settings-label">Units</span>
+          <SegmentedTabs ariaLabel="Units" options={[{value:'original',label:'Original'},{value:'grams',label:'Grams'}]} value={grams ? 'grams' : 'original'} onchange={(value) => grams = value === 'grams'} />
+        </div>
+      </div>
+    </Dropdown>
+  </div>
 </section>
 <div class="recipe-columns">
 <section><h2 class="sr-only">Ingredients</h2>{#each recipe.ingredient_groups as group}<section class="ingredients">{#if group.name && recipe.ingredient_groups.length > 1}<h3>{group.name}</h3>{/if}{#each group.ingredients as row}{@const weight = gramText(row,factor)}<div class:checked={checked.includes(row.id)}><label class="ingredient"><input type="checkbox" checked={checked.includes(row.id)} onchange={() => checked = checked.includes(row.id) ? checked.filter(value => value !== row.id) : [...checked, row.id]}>
@@ -137,6 +152,5 @@
 {:else if !error}<p role="status">Opening the recipe…</p>{/if}
 
 <style>
-  .byline,.controls-heading{display:flex;align-items:center;gap:.5rem}.byline .eyebrow{margin:0}.controls-heading{justify-content:space-between}.controls-heading h2{margin:0}.small-control{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:.3rem .5rem;border:1px solid transparent;border-radius:.4rem;background:transparent;color:var(--ui-text);cursor:pointer}.small-control:hover,.small-control.selected{border-color:var(--ui-control-border);background:var(--ui-surface)}.scale-panel{margin-top:.5rem;padding:.65rem;border:1px solid var(--ui-control-border);border-radius:.5rem;background:var(--ui-surface-muted)}.scale-panel .toolbar{margin:.25rem 0}.scale-panel label{display:inline-flex;align-items:center;gap:.35rem}.scale-panel input{width:5.5rem}.gram-amount{border:0;padding:0;background:none;color:inherit;font:inherit;text-decoration:underline dotted;text-underline-offset:.18em;cursor:help}.gram-amount.unavailable{text-decoration-color:#bd6518}.scale-badge{display:inline-block;margin-right:.35rem;padding:.05rem .3rem;border-radius:.3rem;background:#f6d2ad;color:#7a3900;font-size:.72rem;font-weight:700;line-height:1.35;vertical-align:.12em}.dialog-actions{display:flex;justify-content:flex-end;gap:.5rem;margin-top:1.25rem}.photos{margin-top:2rem}
-  .ingredient{align-items:center}.ingredient input{margin:0}.gram-amount{min-height:0;line-height:inherit}
+  .byline,.controls-heading{display:flex;align-items:center;gap:.5rem}.byline .eyebrow{margin:0}.controls-heading{justify-content:space-between}.controls-heading h2{margin:0}.small-control{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:.3rem .5rem;border:1px solid transparent;border-radius:.4rem;background:transparent;color:var(--ui-text);cursor:pointer}.small-control:hover{border-color:var(--ui-control-border);background:var(--ui-surface)}.ingredient-settings{display:flex;flex-direction:column;gap:.8rem;min-width:18rem;padding:.35rem}.settings-group{display:flex;flex-direction:column;gap:.35rem}.settings-label{font-size:.8rem;font-weight:650;color:var(--muted)}.ingredient-settings label{display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-size:.9rem}.ingredient-settings input{width:6rem;min-height:32px;padding:.25rem .4rem}.ingredient{align-items:center}.ingredient input{margin:0}.gram-amount{min-height:0;line-height:inherit}
 </style>
