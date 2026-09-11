@@ -19,9 +19,9 @@ Preserve authored prose and legacy IDs. Enforce ownership/privacy on the backend
 
 After API schema changes, run `bun run --cwd recipe-creator-frontend generate:api`; do not hand-edit `src/api.generated.ts`. Keep dependencies locked, changes focused, and documentation brief.
 
-## Commit policy
+## ALWAYS COMMIT
 
-Committing is part of task completion, not optional cleanup. Unless the user explicitly says not to commit, every completed code, configuration, test, or documentation change MUST be committed before the final response.
+**Before every final response after modifying repository files, commit all changes owned by the current task. The only exception is when the user explicitly asks not to commit.**
 
 Use this exact delivery gate:
 
