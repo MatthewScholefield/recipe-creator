@@ -109,13 +109,13 @@ it('keeps detail, fallback, scaling, and authored text consistent', async () => 
   expect(screen.getByText('¾–2 ¼ tablespoons oil')).toBeInTheDocument();
 
   await fireEvent.click(screen.getByRole('tab',{name:'Grams'}));
-  const weight = screen.getByRole('button',{name:'180 g'});
-  await fireEvent.focusIn(weight);
+  const weight = screen.getByText('180 g');
+  await fireEvent.mouseEnter(weight.parentElement!);
   expect(await screen.findByRole('tooltip')).toHaveTextContent(
     'As written: ½ cup flour from family notes',
   );
-  expect(screen.getAllByRole('button',{name:'1.8 cup'})).toHaveLength(2);
-  expect(screen.getAllByRole('button',{name:'1.8 cup'})[0]).toHaveClass('unavailable');
+  expect(screen.getAllByText('1.8 cup')).toHaveLength(2);
+  expect(screen.getAllByText('1.8 cup')[0]).toHaveClass('unavailable');
   expect(screen.getByText('sugar')).toBeInTheDocument();
 });
 it('flags unscalable ingredients and explains unavailable gram conversions', async () => {
@@ -131,9 +131,9 @@ it('flags unscalable ingredients and explains unavailable gram conversions', asy
   expect(view.container.querySelector('.scale-badge')).toHaveTextContent('2×');
   expect(screen.getByText('⅗ cup tapioca starch/flour, plus more for sprinkling')).toBeInTheDocument();
   await fireEvent.click(screen.getByRole('tab',{name:'Grams'}));
-  const amount = screen.getByRole('button',{name:'2 cup'});
+  const amount = screen.getByText('2 cup');
   expect(amount).toHaveClass('unavailable');
-  await fireEvent.mouseEnter(amount.closest('.tooltip-wrap')!);
+  await fireEvent.mouseEnter(amount.parentElement!);
   expect(await screen.findByRole('tooltip')).toHaveTextContent('No gram conversion: The ingredient type is not specific enough to choose a density.');
   expect(screen.getByText('flour')).toBeInTheDocument();
 });
@@ -148,8 +148,8 @@ it('shows a recommended gram estimate with uncertainty and details in its toolti
   expect(screen.getByRole('button',{name:'Recalculate weight estimates'})).toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Adjust ingredient scale'}));
   await fireEvent.click(screen.getByRole('tab',{name:'Grams'}));
-  const grams = screen.getByRole('button',{name:'120 g'});
-  await fireEvent.focusIn(grams);
+  const grams = screen.getByText('120 g');
+  await fireEvent.mouseEnter(grams.parentElement!);
   const tooltip = await screen.findByRole('tooltip');
   expect(tooltip).toHaveTextContent('As written: 1 cup flour Estimate: 120 ± 10 g');
   expect(tooltip.textContent).toContain('As written: 1 cup flour\nEstimate: 120 ± 10 g');

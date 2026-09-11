@@ -109,7 +109,7 @@
 {#if recipe.mode === 'text'}<p class="notice">Shared as written. Ingredient scaling and gram tools are unavailable until this recipe is organized.</p>
 <div class="prose recipe-body">{recipe.source_text}</div>{#if recipe.can_edit}<Button variant="secondary" size="sm" href={`/recipes/${id(recipe.id)}/edit`} onclick={openEditor}><Icon name="edit" size={16} />Organize ingredients</Button>{/if}
 {:else}
-<section class="cooking-controls no-print" aria-label="Cooking controls">
+<section class="no-print" aria-label="Cooking controls">
   <div class="controls-heading"><h2>Ingredients</h2>
     <Dropdown label="Ingredient settings" closeOnSelect={false}>
       {#snippet trigger(open)}
@@ -134,9 +134,9 @@
 <section><h2 class="sr-only">Ingredients</h2>{#each recipe.ingredient_groups as group}<section class="ingredients">{#if group.name && recipe.ingredient_groups.length > 1}<h3>{group.name}</h3>{/if}{#each group.ingredients as row}{@const weight = gramText(row,factor)}<div class:checked={checked.includes(row.id)}><label class="ingredient"><input type="checkbox" checked={checked.includes(row.id)} onchange={() => checked = checked.includes(row.id) ? checked.filter(value => value !== row.id) : [...checked, row.id]}>
   {#if scaleBadge(row)}<span class="scale-badge">{scaledAmount(1)}×</span>{/if}
   {#if grams && weight}
-    <span>{row.grams?.estimated === false ? '' : '≈ '}<Tooltip text={gramExplanation(row)}><button type="button" class="gram-amount">{weight}</button></Tooltip>{' '}{ingredientTail(row) || row.original_text}</span>
+    <span>{row.grams?.estimated === false ? '' : '≈ '}<Tooltip text={gramExplanation(row)}><span class="gram-amount">{weight}</span></Tooltip>{' '}{ingredientTail(row) || row.original_text}</span>
   {:else if grams}
-    <span><Tooltip text={gramUnavailableExplanation(row)}><button type="button" class="gram-amount unavailable">{originalAmount(row) || ingredientText(row,factor)}</button></Tooltip>{#if originalAmount(row)}{' '}{ingredientTail(row)}{/if}</span>
+    <span><Tooltip text={gramUnavailableExplanation(row)}><span class="gram-amount unavailable">{originalAmount(row) || ingredientText(row,factor)}</span></Tooltip>{#if originalAmount(row)}{' '}{ingredientTail(row)}{/if}</span>
   {:else}
     <span>{ingredientText(row,factor)}</span>
   {/if}
@@ -152,5 +152,5 @@
 {:else if !error}<p role="status">Opening the recipe…</p>{/if}
 
 <style>
-  .byline,.controls-heading{display:flex;align-items:center;gap:.5rem}.byline .eyebrow{margin:0}.controls-heading{justify-content:space-between}.controls-heading h2{margin:0}.small-control{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:.3rem .5rem;border:1px solid transparent;border-radius:.4rem;background:transparent;color:var(--ui-text);cursor:pointer}.small-control:hover{border-color:var(--ui-control-border);background:var(--ui-surface)}.ingredient-settings{display:flex;flex-direction:column;gap:.8rem;min-width:18rem;padding:.35rem}.settings-group{display:flex;flex-direction:column;gap:.35rem}.settings-label{font-size:.8rem;font-weight:650;color:var(--muted)}.ingredient-settings label{display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-size:.9rem}.ingredient-settings input{width:6rem;min-height:32px;padding:.25rem .4rem}.ingredient{align-items:center}.ingredient input{margin:0}.gram-amount{min-height:0;line-height:inherit}
+  .byline,.controls-heading{display:flex;align-items:center;gap:.5rem}.byline .eyebrow{margin:0}.controls-heading{justify-content:flex-start}.controls-heading h2{margin:0}.small-control{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:.3rem .5rem;border:1px solid transparent;border-radius:.4rem;background:transparent;color:var(--ui-text);cursor:pointer}.small-control:hover{border-color:var(--ui-control-border);background:var(--ui-surface)}.ingredient-settings{display:flex;flex-direction:column;gap:.8rem;min-width:18rem;padding:.35rem}.settings-group{display:flex;flex-direction:column;gap:.35rem}.settings-label{font-size:.8rem;font-weight:650;color:var(--muted)}.ingredient-settings label{display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-size:.9rem}.ingredient-settings input{width:6rem;min-height:32px;padding:.25rem .4rem}.ingredient{align-items:center}.ingredient input{margin:0}.gram-amount{line-height:inherit;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px;cursor:help}
 </style>

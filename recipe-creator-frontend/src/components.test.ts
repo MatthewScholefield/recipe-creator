@@ -111,7 +111,7 @@ it('retains drafts and reports a revision conflict instead of overwriting', asyn
   mockApi((url,init) => url === '/api/session' ? identity : init?.method === 'PUT' ? new Response(JSON.stringify({detail:'Newer revision exists'}),{status:409}) : recipe);
   const view = render(Editor,{recipeId:'r1',navigate:vi.fn()}); await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'My soup'}}); await fireEvent.click(screen.getByRole('button',{name:'Save changes'})); expect(await screen.findByRole('heading',{name:'A newer version exists'})).toBeInTheDocument(); expect(screen.getByLabelText('Recipe title')).toHaveValue('My soup'); view.unmount(); const saved = JSON.parse(localStorage.getItem('notebook:draft:r1')!); expect(saved.revision).toBe(2); expect(saved.draft.title).toBe('My soup');
 });
-it('scales only ingredients and exposes originals on the grams amount, including keyboard focus', async () => {
+it('scales only ingredients and exposes originals on the gram amount tooltip', async () => {
   const weighted = {...recipe,ingredient_groups:[{...recipe.ingredient_groups[0],ingredients:[{...recipe.ingredient_groups[0].ingredients[0],grams:{amount:120,estimated:false}}]}]};
   mockApi(url => url === '/api/session' ? identity : url.startsWith('/api/photos') ? {items:[]} : weighted);
   render(Detail,{recipeId:'r1',navigate:vi.fn()}); await screen.findByRole('heading',{name:'Soup'});
@@ -125,12 +125,11 @@ it('scales only ingredients and exposes originals on the grams amount, including
   expect(screen.queryByText('Original & weight details')).not.toBeInTheDocument();
   expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('tab',{name:'Grams'}));
-  const amount = screen.getByRole('button',{name:'240 g'});
-  const trigger = amount.closest('.tooltip-wrap')!;
-  amount.focus(); expect(amount).toHaveFocus();
-  await fireEvent.focusIn(amount);
+  const amount = screen.getByText('240 g');
+  const trigger = amount.parentElement!;
+  await fireEvent.mouseEnter(trigger);
   expect(await screen.findByRole('tooltip')).toHaveTextContent('As written: ½ cup stock');
-  await fireEvent.focusOut(trigger); expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  await fireEvent.mouseLeave(trigger); expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   expect(screen.getByText('Simmer 20 minutes at 180°C.')).toBeInTheDocument();
   await fireEvent.click(screen.getByRole('tab',{name:'Original'}));
   expect(screen.getByText('1 cup stock')).toBeInTheDocument();
