@@ -3,7 +3,7 @@ set positional-arguments
 BACKEND := "recipe-creator-backend"
 FRONTEND := "recipe-creator-frontend"
 UV := env_var_or_default("UV", "uv")
-NPM := env_var_or_default("NPM", "npm")
+BUN := env_var_or_default("BUN", "bun")
 SURREAL := env_var_or_default("SURREAL", "surreal")
 UVICORN_WORKERS := env_var_or_default("UVICORN_WORKERS", "1")
 CLI := UV + " run --project " + BACKEND + " python -m recipe_creator.cli"
@@ -16,7 +16,7 @@ help:
 # Install locked backend and frontend dependencies.
 install:
     {{ UV }} sync --project {{ BACKEND }} --locked
-    {{ NPM }} --prefix {{ FRONTEND }} ci
+    {{ BUN }} --cwd {{ FRONTEND }} install --frozen-lockfile
 
 # Start the local SurrealKV datastore.
 db:
@@ -27,7 +27,7 @@ dev:
     #!/bin/sh
     WEB_CONCURRENCY={{ UVICORN_WORKERS }} {{ API }} --reload --reload-dir {{ BACKEND }}/src --host 127.0.0.1 --port 2332 --no-proxy-headers &
     api=$!
-    {{ NPM }} --prefix {{ FRONTEND }} run dev &
+    {{ BUN }} run --cwd {{ FRONTEND }} dev &
     web=$!
     trap 'kill $api $web 2>/dev/null || true' INT TERM EXIT
     wait
@@ -38,17 +38,17 @@ dev-api:
 
 # Start only the frontend development server.
 dev-web:
-    {{ NPM }} --prefix {{ FRONTEND }} run dev
+    {{ BUN }} run --cwd {{ FRONTEND }} dev
 
 # Build backend and frontend production artifacts.
 build:
     {{ UV }} build --project {{ BACKEND }}
-    {{ NPM }} --prefix {{ FRONTEND }} run build
+    {{ BUN }} run --cwd {{ FRONTEND }} build
 
 # Run backend syntax and frontend type checks.
 check:
     {{ UV }} run --project {{ BACKEND }} python -m compileall -q {{ BACKEND }}/src
-    {{ NPM }} --prefix {{ FRONTEND }} run check
+    {{ BUN }} run --cwd {{ FRONTEND }} check
 
 # Run backend and frontend tests.
 test: test-backend test-frontend
@@ -59,7 +59,7 @@ test-backend:
 
 # Run frontend tests.
 test-frontend:
-    {{ NPM }} --prefix {{ FRONTEND }} test
+    {{ BUN }} run --cwd {{ FRONTEND }} test
 
 # Apply pending database migrations.
 migrate *args:

@@ -4,7 +4,7 @@ A small recipe notebook for family and friends. Browse without an account, publi
 
 ## Run locally
 
-Requires Python 3.12+, uv, Node.js 22+, npm, the SurrealDB 3.2.4 CLI, and [just](https://just.systems/man/en/installation.html).
+Requires Python 3.12+, uv, Bun 1.4+, the SurrealDB 3.2.4 CLI, and [just](https://just.systems/man/en/installation.html).
 
 ```sh
 just install

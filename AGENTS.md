@@ -17,7 +17,7 @@ Database tests require a disposable real SurrealDB and `RECIPE_TEST_DB_URL` / `R
 
 Preserve authored prose and legacy IDs. Enforce ownership/privacy on the backend; never expose pending photos or secrets. Keep atomic writes in the repository transaction layer—its upstream compatibility fixes have real-DB regression tests. Migrations are explicit, never automatic at API startup.
 
-After API schema changes, run `npm --prefix recipe-creator-frontend run generate:api`; do not hand-edit `src/api.generated.ts`. Keep dependencies locked, changes focused, and documentation brief.
+After API schema changes, run `bun run --cwd recipe-creator-frontend generate:api`; do not hand-edit `src/api.generated.ts`. Keep dependencies locked, changes focused, and documentation brief.
 
 ## Commit policy
 

@@ -25,7 +25,7 @@ export default defineConfig({
       timeout: 120_000,
     }] : []),
     {
-      command: `npm run build && npm run preview -- --host 127.0.0.1 --port ${port} --strictPort`,
+      command: `bun run build && bun run preview -- --host 127.0.0.1 --port ${port} --strictPort`,
       url: origin,
       reuseExistingServer: false,
     },
