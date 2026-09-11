@@ -1,6 +1,12 @@
-import type { Ingredient, RecipeDraft, ParseResult } from './types';
+import type { Ingredient, Recipe, RecipeDraft, ParseResult } from './types';
 export function blank(mode: RecipeDraft['mode'] = 'text'): RecipeDraft { return { title: '', source_text: '', mode, description: '', ingredient_groups: [], directions: '', notes: '', tags: [], yield_amount: null, yield_unit: '', source_url: '', modifications: '' }; }
 export function ingredient(): Ingredient { return { id: crypto.randomUUID(), original_text: '', quantity: null, quantity_max: null, unit: '', name: '', preparation: '', optional: false, grams: null }; }
+export function recipeDraftFromRecipe(recipe: Recipe): RecipeDraft {
+  const empty = blank();
+  return JSON.parse(JSON.stringify(Object.fromEntries(
+    Object.keys(empty).map(key => [key, recipe[key as keyof Recipe] ?? empty[key as keyof RecipeDraft]]),
+  ))) as RecipeDraft;
+}
 const fractions: Record<string, string> = {
   '¼': '1/4', '½': '1/2', '¾': '3/4', '⅐': '1/7', '⅑': '1/9',
   '⅒': '1/10', '⅓': '1/3', '⅔': '2/3', '⅕': '1/5', '⅖': '2/5',

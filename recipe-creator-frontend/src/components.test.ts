@@ -107,9 +107,19 @@ it('cancels parsing without losing source text', async () => {
   mockApi((url,init) => url === '/api/session' ? identity : new Promise((_resolve,reject) => {signal = init?.signal as AbortSignal; signal?.addEventListener('abort',() => reject(new DOMException('Cancelled','AbortError')));}));
   render(Editor,{navigate:vi.fn()}); await startNewRecipe(); await fireEvent.input(await screen.findByLabelText('Paste or write your recipe'),{target:{value:'Keep every word'}}); await fireEvent.click(screen.getByRole('button',{name:'Organize'})); await waitFor(() => expect(signal).toBeDefined()); await fireEvent.click(screen.getByRole('button',{name:'Cancel organizing'})); expect(signal?.aborted).toBe(true); expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue('Keep every word');
 });
-it('retains drafts and reports a revision conflict instead of overwriting', async () => {
+it('opens an in-editor comparison and preserves the true base with the draft', async () => {
   mockApi((url,init) => url === '/api/session' ? identity : init?.method === 'PUT' ? new Response(JSON.stringify({detail:'Newer revision exists'}),{status:409}) : recipe);
-  const view = render(Editor,{recipeId:'r1',navigate:vi.fn()}); await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'My soup'}}); await fireEvent.click(screen.getByRole('button',{name:'Save changes'})); expect(await screen.findByRole('heading',{name:'A newer version exists'})).toBeInTheDocument(); expect(screen.getByLabelText('Recipe title')).toHaveValue('My soup'); view.unmount(); const saved = JSON.parse(localStorage.getItem('notebook:draft:r1')!); expect(saved.revision).toBe(2); expect(saved.draft.title).toBe('My soup');
+  const view = render(Editor,{recipeId:'r1',navigate:vi.fn()});
+  await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'My <img src=x onerror=alert(1)> soup'}});
+  await fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+  expect(await screen.findByRole('heading',{name:'Review recipe changes'})).toHaveFocus();
+  expect(await screen.findByLabelText('Your changes to Title')).toHaveTextContent('-Soup');
+  expect(screen.getByLabelText('Your changes to Title')).toHaveTextContent('+My <img src=x onerror=alert(1)> soup');
+  expect(document.querySelector('img[src="x"]')).toBeNull();
+  expect(screen.queryByLabelText('Recipe title')).not.toBeInTheDocument();
+  view.unmount();
+  const saved = JSON.parse(localStorage.getItem('notebook:draft:r1')!);
+  expect(saved).toMatchObject({revision:2,draft:{title:'My <img src=x onerror=alert(1)> soup'},base:{revision:2,draft:{title:'Soup'}}});
 });
 it('scales only ingredients and exposes originals on the gram amount tooltip', async () => {
   const weighted = {...recipe,ingredient_groups:[{...recipe.ingredient_groups[0],ingredients:[{...recipe.ingredient_groups[0].ingredients[0],grams:{amount:120,estimated:false}}]}]};

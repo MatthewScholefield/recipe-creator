@@ -3,13 +3,13 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import Editor from './Editor.svelte';
 import { appState } from './app-state.svelte';
 import { clearSession } from './api';
-import { blank, changedIngredient, ingredient } from './recipe';
+import { blank, changedIngredient, ingredient, recipeDraftFromRecipe } from './recipe';
 import { createDraft, listDrafts, readDraft, saveDraft } from './drafts';
 
 const identity = {user:{id:'u1',display_name:'Cook',state:'active',photo_trusted:false},device_id:'d1',admin:false,csrf_token:'csrf'};
 const anonymous = {...identity,user:null,device_id:null};
 const oldRow = {...ingredient(),id:'legacy-row',original_text:'  ½ cup stock ',quantity:'0.5',unit:'cup',name:'stock',grams:{amount:120,estimated:true,basis:'legacy'}};
-const recipe = {...blank('structured'),id:'r1',title:'Soup',revision:2,owner_id:'u1',author_name:'Cook',can_edit:true,directions:'  Simmer\n',ingredient_groups:[{id:'legacy-group',name:'',ingredients:[oldRow]}]};
+const recipe = {...blank('structured'),id:'r1',title:'Soup',revision:2,owner_id:'u1',author_name:'Cook',can_edit:true,enrichment_status:'complete',directions:'  Simmer\n',ingredient_groups:[{id:'legacy-group',name:'',ingredients:[oldRow]}]};
 function mockApi(handler: (url: string, init?: RequestInit) => unknown | Promise<unknown>, named = true, currentIdentity = identity) {
   const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const path = String(url);
@@ -186,11 +186,211 @@ it('requires a choice before formatting source and can undo back to exact origin
   await fireEvent.click(screen.getByRole('button',{name:'Edit as text'})); await fireEvent.click(screen.getByRole('button',{name:'Use original text'}));
   expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue(value.draft.source_text);
 });
-it('retains recovered edits at their original revision on conflict', async () => {
+it('keeps old recovered drafts and labels their comparison as unattributed', async () => {
   localStorage.setItem('notebook:draft:r1',JSON.stringify({draft:{...blank(),title:'Recovered',source_text:' exact\n'},revision:1,key:'key',saved:new Date().toISOString()}));
-  const fetcher = mockApi((url, init) => init?.method === 'PUT' ? new Response(JSON.stringify({detail:'Newer revision'}),{status:409}) : recipe);
-  const navigate = vi.fn(), view = render(Editor,{recipeId:'r1',navigate}); await fireEvent.click(await screen.findByRole('button',{name:'Edit draft'}));
-  await fireEvent.click(screen.getByRole('button',{name:'Save changes'})); expect(await screen.findByRole('heading',{name:'A newer version exists'})).toBeInTheDocument();
-  const write = fetcher.mock.calls.find(([,init]) => init?.method === 'PUT')!; expect(JSON.parse(write[1]!.body as string).expected_revision).toBe(1);
-  view.unmount(); expect(JSON.parse(localStorage.getItem('notebook:draft:r1')!).draft.source_text).toBe(' exact\n'); expect(navigate).not.toHaveBeenCalled();
+  const fetcher = mockApi((_url, init) => init?.method === 'PUT' ? new Response(JSON.stringify({detail:'Newer revision'}),{status:409}) : recipe);
+  const navigate = vi.fn(), view = render(Editor,{recipeId:'r1',navigate});
+  await fireEvent.click(await screen.findByRole('button',{name:'Edit draft'}));
+  await fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+  expect(await screen.findByRole('heading',{name:'Review recipe changes'})).toBeInTheDocument();
+  expect(await screen.findByText(/does not include its starting recipe/)).toBeInTheDocument();
+  expect(screen.getByRole('heading',{name:'Latest saved recipe → your draft'})).toBeInTheDocument();
+  const write = fetcher.mock.calls.find(([,init]) => init?.method === 'PUT')!;
+  expect(JSON.parse(write[1]!.body as string).expected_revision).toBe(1);
+  view.unmount();
+  expect(JSON.parse(localStorage.getItem('notebook:draft:r1')!).draft.source_text).toBe(' exact\n');
+  expect(navigate).not.toHaveBeenCalled();
+});
+it('keeps the historical base through reload and replaces exactly the reviewed revision', async () => {
+  const base = {...recipe,revision:2,directions:'Simmer 20 minutes',notes:''};
+  const candidate = {...recipeDraftFromRecipe(base),directions:'Simmer 30 minutes',notes:''};
+  localStorage.setItem('notebook:draft:r1',JSON.stringify({draft:candidate,revision:2,base:{revision:2,draft:recipeDraftFromRecipe(base)},key:'key',saved:new Date().toISOString()}));
+  let live = {...base,revision:3,directions:'Simmer 25 minutes',notes:'Saved-only note'};
+  const payloads: Record<string, unknown>[] = [];
+  const fetcher = mockApi((_url, init) => {
+    if (init?.method === 'PUT') {
+      const payload = JSON.parse(init.body as string); payloads.push(payload);
+      if (payloads.length === 1) return new Response(JSON.stringify({detail:'Newer revision'}),{status:409});
+      live = {...live,...payload,revision:4}; return live;
+    }
+    return live;
+  });
+  const navigate = vi.fn();
+  render(Editor,{recipeId:'r1',navigate});
+  await fireEvent.click(await screen.findByRole('button',{name:'Edit draft'}));
+  await fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+  await screen.findByText(/Latest saved recipe: revision 3/);
+  expect(screen.getByLabelText('Your changes to Directions')).toHaveTextContent('-Simmer 20 minutes');
+  expect(screen.getByLabelText('Your changes to Directions')).toHaveTextContent('+Simmer 30 minutes');
+  expect(screen.getByLabelText('Saved changes to Directions')).toHaveTextContent('+Simmer 25 minutes');
+  expect(screen.getByLabelText('Saved changes to Notes')).toHaveTextContent('+Saved-only note');
+  await fireEvent.click(screen.getByRole('button',{name:'Save my version'}));
+  expect(screen.getByText(/Saved changes not present in your draft will be lost/)).toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Replace recipe'}));
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith('/recipes/r1'));
+  expect(payloads.map(payload => payload.expected_revision)).toEqual([2,3]);
+  expect(payloads[1]).toMatchObject({directions:'Simmer 30 minutes',notes:''});
+  expect(fetcher.mock.calls.filter(([url]) => url === '/api/ingredients/parse')).toHaveLength(0);
+  expect(localStorage.getItem('notebook:draft:r1')).toBeNull();
+});
+it('refreshes repeated conflicts and requires a new confirmation without changing the candidate or base', async () => {
+  const base = {...recipe,revision:2,directions:'Simmer 20 minutes',notes:''};
+  let live = base, puts = 0;
+  const payloads: Record<string, unknown>[] = [];
+  const fetcher = mockApi((_url, init) => {
+    if (init?.method === 'PUT') {
+      const payload = JSON.parse(init.body as string); payloads.push(payload); puts += 1;
+      if (puts === 1) { live = {...base,revision:3,directions:'Simmer 25 minutes'}; return new Response('{}',{status:409}); }
+      if (puts === 2) { live = {...base,revision:4,directions:'Simmer 27 minutes',notes:'New saved note'}; return new Response('{}',{status:409}); }
+      live = {...live,...payload,revision:5}; return live;
+    }
+    return live;
+  });
+  const navigate = vi.fn();
+  render(Editor,{recipeId:'r1',navigate});
+  await fireEvent.input(await screen.findByLabelText('Directions'),{target:{value:'Simmer 30 minutes'}});
+  await fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+  await screen.findByText(/Latest saved recipe: revision 3/);
+  await fireEvent.click(screen.getByRole('button',{name:'Back to editing'}));
+  expect(await screen.findByRole('button',{name:'Review changes'})).toHaveFocus();
+  await fireEvent.input(screen.getByLabelText('Directions'),{target:{value:'Simmer 35 minutes'}});
+  await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
+  await screen.findByText(/Latest saved recipe: revision 3/);
+  expect(puts).toBe(1);
+  expect(screen.getByLabelText('Your changes to Directions')).toHaveTextContent('+Simmer 35 minutes');
+  await fireEvent.click(screen.getByRole('button',{name:'Save my version'}));
+  await fireEvent.click(screen.getByRole('button',{name:'Replace recipe'}));
+  expect(await screen.findByText(/recipe changed again/)).toBeInTheDocument();
+  await screen.findByText(/Latest saved recipe: revision 4/);
+  expect(puts).toBe(2);
+  expect(screen.queryByRole('button',{name:'Replace recipe'})).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Your changes to Directions')).toHaveTextContent('+Simmer 35 minutes');
+  expect(screen.getByLabelText('Saved changes to Notes')).toHaveTextContent('+New saved note');
+  await fireEvent.click(screen.getByRole('button',{name:'Save my version'}));
+  await fireEvent.click(screen.getByRole('button',{name:'Replace recipe'}));
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith('/recipes/r1'));
+  expect(payloads.map(payload => payload.expected_revision)).toEqual([2,3,4]);
+  expect(payloads.map(payload => payload.directions)).toEqual(['Simmer 30 minutes','Simmer 35 minutes','Simmer 35 minutes']);
+  expect(fetcher.mock.calls.filter(([,init]) => init?.method === 'PUT')).toHaveLength(3);
+});
+it('discards only the local edit after confirmation and does not recreate it', async () => {
+  let live = recipe;
+  const fetcher = mockApi((_url, init) => {
+    if (init?.method === 'PUT') { live = {...recipe,revision:3,title:'Saved elsewhere'}; return new Response('{}',{status:409}); }
+    return live;
+  });
+  const navigate = vi.fn(), view = render(Editor,{recipeId:'r1',navigate});
+  await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Discard locally'}});
+  await fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+  await screen.findByRole('heading',{name:'Review recipe changes'});
+  await fireEvent.click(screen.getByRole('button',{name:'Discard my draft'}));
+  await fireEvent.click(screen.getByRole('button',{name:'Keep reviewing'}));
+  expect(localStorage.getItem('notebook:draft:r1')).not.toBeNull();
+  expect(navigate).not.toHaveBeenCalled();
+  await fireEvent.click(screen.getByRole('button',{name:'Discard my draft'}));
+  await fireEvent.click(screen.getByRole('button',{name:'Discard draft'}));
+  expect(navigate).toHaveBeenCalledWith('/recipes/r1');
+  await new Promise(resolve => setTimeout(resolve,400));
+  view.unmount();
+  expect(localStorage.getItem('notebook:draft:r1')).toBeNull();
+});
+it('never resubmits after a saved recipe needs local draft cleanup retry', async () => {
+  let live = recipe, puts = 0;
+  let restoreRemoval = () => {};
+  const fetcher = mockApi((_url, init) => {
+    if (init?.method === 'PUT') {
+      puts += 1;
+      if (puts === 1) { live = {...recipe,revision:3}; return new Response('{}',{status:409}); }
+      const removal = vi.spyOn(Storage.prototype,'removeItem').mockImplementation(() => {throw new Error('blocked');});
+      restoreRemoval = () => removal.mockRestore();
+      return {...live,...JSON.parse(init.body as string),revision:4};
+    }
+    return live;
+  });
+  const navigate = vi.fn();
+  render(Editor,{recipeId:'r1',navigate});
+  await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'My exact recipe'}});
+  await fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+  await screen.findByRole('heading',{name:'Review recipe changes'});
+  const saveVersion = screen.getByRole('button',{name:'Save my version'});
+  await waitFor(() => expect(saveVersion).toBeEnabled());
+  await fireEvent.click(saveVersion);
+  const replace = screen.getByRole('button',{name:'Replace recipe'});
+  await waitFor(() => expect(replace).toBeEnabled());
+  await fireEvent.click(replace);
+  await waitFor(() => expect(fetcher.mock.calls.filter(([,init]) => init?.method === 'PUT')).toHaveLength(2));
+  expect(await screen.findByText('Recipe saved, but its local draft could not be removed.')).toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Save my version'})).not.toBeInTheDocument();
+  restoreRemoval();
+  await fireEvent.click(screen.getByRole('button',{name:'Retry draft removal'}));
+  expect(navigate).toHaveBeenCalledWith('/recipes/r1');
+  expect(fetcher.mock.calls.filter(([,init]) => init?.method === 'PUT')).toHaveLength(2);
+  expect(localStorage.getItem('notebook:draft:r1')).toBeNull();
+});
+it('keeps the editor usable when a late comparison finishes after Back', async () => {
+  const pending = (Promise as PromiseConstructor & {withResolvers<T>(): {promise: Promise<T>; resolve(value: T): void; reject(reason?: unknown): void}}).withResolvers<unknown>();
+  let gets = 0;
+  mockApi((_url, init) => {
+    if (init?.method === 'PUT') return new Response('{}',{status:409});
+    gets += 1;
+    return gets === 1 ? recipe : pending.promise;
+  });
+  render(Editor,{recipeId:'r1',navigate:vi.fn()});
+  await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Keep editing'}});
+  await fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+  await screen.findByLabelText('Loading the latest recipe…');
+  const back = screen.getByRole('button',{name:'Back to editing'});
+  await waitFor(() => expect(back).toBeEnabled());
+  await fireEvent.click(back);
+  expect(await screen.findByRole('button',{name:'Review changes'})).toHaveFocus();
+  pending.resolve({...recipe,revision:3,title:'Late result'});
+  await waitFor(() => expect(screen.getByLabelText('Recipe title')).toHaveValue('Keep editing'));
+  expect(screen.queryByRole('heading',{name:'Review recipe changes'})).not.toBeInTheDocument();
+});
+it('retains the draft and prohibits replacement when latest loading fails or permission is lost', async () => {
+  let gets = 0;
+  const fetcher = mockApi((_url, init) => {
+    if (init?.method === 'PUT') return new Response('{}',{status:409});
+    gets += 1;
+    if (gets === 1) return recipe;
+    if (gets === 2) return new Response(JSON.stringify({detail:'Gone'}),{status:404});
+    return {...recipe,revision:3,can_edit:false};
+  });
+  render(Editor,{recipeId:'r1',navigate:vi.fn()});
+  await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Retained draft'}});
+  await fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+  expect(await screen.findByRole('alert')).toHaveTextContent('recipe is unavailable');
+  expect(screen.getByRole('button',{name:'Save my version'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Discard my draft'})).toBeEnabled();
+  await fireEvent.click(screen.getByRole('button',{name:'Retry comparison'}));
+  expect(await screen.findByText(/no longer have permission/)).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Save my version'})).toBeDisabled();
+  expect(JSON.parse(localStorage.getItem('notebook:draft:r1')!).draft.title).toBe('Retained draft');
+  expect(fetcher.mock.calls.filter(([,init]) => init?.method === 'PUT')).toHaveLength(1);
+});
+it('keeps review content accessible when local discard fails and permits a deletion retry', async () => {
+  let live = recipe;
+  const fetcher = mockApi((_url, init) => {
+    if (init?.method === 'PUT') { live = {...recipe,revision:3}; return new Response('{}',{status:409}); }
+    return live;
+  });
+  const navigate = vi.fn();
+  render(Editor,{recipeId:'r1',navigate});
+  await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Do not lose'}});
+  await fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+  await screen.findByText(/Latest saved recipe: revision 3/);
+  await fireEvent.click(screen.getByRole('button',{name:'Discard my draft'}));
+  const originalRemove = Storage.prototype.removeItem;
+  const removal = vi.spyOn(Storage.prototype,'removeItem').mockImplementation(function (this: Storage, key) {
+    if (key === 'notebook:draft:r1') throw new Error('blocked');
+    return Reflect.apply(originalRemove, this, [key]);
+  });
+  await fireEvent.click(screen.getByRole('button',{name:'Discard draft'}));
+  expect(await screen.findByText(/Could not discard this draft/)).toBeInTheDocument();
+  expect(navigate).not.toHaveBeenCalled();
+  expect(localStorage.getItem('notebook:draft:r1')).not.toBeNull();
+  removal.mockRestore();
+  await fireEvent.click(screen.getByRole('button',{name:'Discard draft'}));
+  expect(navigate).toHaveBeenCalledWith('/recipes/r1');
+  expect(fetcher.mock.calls.filter(([,init]) => init?.method === 'PUT')).toHaveLength(1);
 });

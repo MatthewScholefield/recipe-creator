@@ -9,7 +9,15 @@ export interface LocalDraft extends DraftSummary {
   undo?: RecipeDraft;
   ingredientLines?: Record<string, string>;
 }
-export interface LegacyDraft { draft: RecipeDraft; revision?: number; key: string; undo?: RecipeDraft; saved: string; ingredientLines?: Record<string, string> }
+export interface LegacyDraft {
+  draft: RecipeDraft;
+  revision?: number;
+  key: string;
+  undo?: RecipeDraft;
+  saved: string;
+  ingredientLines?: Record<string, string>;
+  base?: {revision: number; draft: RecipeDraft};
+}
 const prefix = 'notebook:draft:v2:';
 const legacyKey = 'notebook:draft:new';
 const changed = 'notebook:drafts-changed';
@@ -95,7 +103,12 @@ export function readLegacyDraft(recipeId?: string): LegacyDraft | null {
     if (!object(value) || !isRecipeDraft(value.draft) || !text(value.key) || !value.key || !date(value.saved) ||
       (value.undo !== undefined && !isRecipeDraft(value.undo)) || !lines(value.ingredientLines) ||
       (recipeId && (!Number.isInteger(value.revision) || Number(value.revision) < 1))) return null;
-    return value as unknown as LegacyDraft;
+    const {base: storedBase, ...draft} = value;
+    const base = object(storedBase) && Number.isInteger(storedBase.revision) && Number(storedBase.revision) >= 1 &&
+      storedBase.revision === value.revision && isRecipeDraft(storedBase.draft)
+      ? {revision: Number(storedBase.revision), draft: storedBase.draft}
+      : undefined;
+    return {...draft, ...(base ? {base} : {})} as unknown as LegacyDraft;
   } catch { return null; }
 }
 function migrated(value: LegacyDraft, id: string): LocalDraft {

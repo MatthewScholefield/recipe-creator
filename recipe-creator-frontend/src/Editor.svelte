@@ -4,7 +4,7 @@
   import { save, safeUrl } from './local';
   import { appState, refreshIdentity } from './app-state.svelte';
   import { blank, ingredient, formatRecipe, applyParse, ParseGuard, move, ingredientLine, changedIngredient,
-    dirtyIngredientLines, applyIngredientLines, withoutEmptyIngredients, normalizeTags, tagError, MEAL_CLASSIFIERS } from './recipe';
+    dirtyIngredientLines, applyIngredientLines, withoutEmptyIngredients, normalizeTags, recipeDraftFromRecipe, tagError, MEAL_CLASSIFIERS } from './recipe';
   import { createDraft, saveDraft, readDraft, listDrafts, deleteDraft, deleteLegacyDraft, draftHref, subscribeDrafts,
     migrateLegacyDraft, readLegacyDraft, recoverLegacyDraft, type LocalDraft, type LegacyDraft, type DraftSummary } from './drafts';
   import IdentityPrompt from './IdentityPrompt.svelte';
@@ -16,6 +16,7 @@
   import PhotoDate from './PhotoDate.svelte';
   import Button from './ui/Button.svelte';
   import BackLink from './ui/BackLink.svelte';
+  import RecipeConflict from './RecipeConflict.svelte';
   import type { Recipe, RecipeDraft, ParseResult, IngredientGroup, IngredientLinesResult, TagCatalog } from './types';
 
   let { recipeId, draftId, navigate }: {recipeId?: string; draftId?: string; navigate: (path: string, options?: {replace?: boolean}) => void} = $props();
@@ -23,21 +24,26 @@
   const helpId = `publish-help-${crypto.randomUUID()}`;
   const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
   let draft = $state<RecipeDraft>(blank('text')), revision = $state<number>(), undo = $state<RecipeDraft>();
+  let editBase = $state<{revision: number; draft: RecipeDraft}>();
   let editorRecipe = $state<Recipe>();
   let dirty = $state<Record<string, string>>({}), undoLines = $state<Record<string, string>>({});
   let ready = $state(false), allowed = $state(untrack(() => !recipeId)), busy = $state(false), parsing = $state(false);
-  let error = $state(''), notice = $state(''), persisted = $state(''), conflict = $state(false), external = $state(false);
+  let error = $state(''), notice = $state(''), persisted = $state(''), external = $state(false);
+  let needsReview = $state(false);
+  let review = $state<null | {status: 'loading' | 'ready' | 'error'; candidate: RecipeDraft; latest?: Recipe; error: string}>(null);
+  let reviewEpoch = $state(0), completedRecipeId = $state(''), completionError = $state('');
   let activeId = $state(''), draftName = $state(''), naming = $state(false), textChoice = $state(false), discard = $state(false);
   let drafts = $state<DraftSummary[]>([]), legacyAvailable = $state(false), recovered = $state<LegacyDraft | null>(null);
   let tags = $state<string[]>([...MEAL_CLASSIFIERS]), tagsError = $state('');
   let publishKey: string = crypto.randomUUID(), baseline = '', lastSaved: string | null = null, alive = true, writing = false;
-  const guard = new ParseGuard(), lifetime = new AbortController();
+  let autosaveStopped = false, saveControl = $state<HTMLButtonElement>();
+  const guard = new ParseGuard(), reviewGuard = new ParseGuard(), lifetime = new AbortController();
   const inputs = new Map<string, HTMLInputElement>();
   let hasIdentity = $derived(appState.identity?.user?.state === 'active');
   let validation = $derived(tagError(draft.tags));
   let editing = $derived(!!recipeId || !!activeId);
   let submitHelp = $derived(!hasIdentity ? `Set your name to ${recipeId ? 'save changes' : 'publish'}` :
-    external ? 'Reload or save as a new draft before publishing.' : validation || (!draft.title.trim() ? 'Add a recipe title.' : busy ? 'Saving your recipe…' : parsing ? 'Wait for organization or cancel it.' : 'Ready to save.'));
+    external ? 'Reload or save as a new draft before publishing.' : validation || (!draft.title.trim() ? 'Add a recipe title.' : busy ? 'Saving your recipe…' : parsing ? 'Wait for organization or cancel it.' : needsReview ? 'Prepare and review your changes against the latest recipe.' : 'Ready to save.'));
   let submitDisabled = $derived(!hasIdentity || !ready || !allowed || busy || parsing || !!recovered || external || !draft.title.trim() || !!validation);
 
   function resume(value: LocalDraft) {
@@ -47,7 +53,7 @@
     baseline = JSON.stringify(draft); lastSaved = JSON.stringify(readDraft(value.id)); external = false; error = '';
   }
   function flush() {
-    if (!ready || !allowed || !editing || recovered || external) return false;
+    if (autosaveStopped || !ready || !allowed || !editing || recovered || external) return false;
     if (activeId && !writing && JSON.stringify(readDraft(activeId)) !== lastSaved) {
       external = true; cancelWork(); return false;
     }
@@ -57,7 +63,7 @@
     if (activeId) {
       const local: LocalDraft = {...value, version: 2, id: activeId, name: draftName.trim().slice(0, 120) || 'Untitled recipe', updatedAt: new Date().toISOString(), publishKey};
       ok = saveDraft(local); if (ok) lastSaved = JSON.stringify(local);
-    } else ok = save(storageKey, {...value, revision, key: publishKey, saved: new Date().toISOString()});
+    } else ok = save(storageKey, {...value, revision, ...(recipeId && editBase ? {base: copy(editBase)} : {}), key: publishKey, saved: new Date().toISOString()});
     writing = false;
     persisted = ok ? 'Draft saved on this device.' : 'Local storage is unavailable. Keep this tab open or copy your recipe before leaving.';
     return ok;
@@ -87,6 +93,10 @@
   function restoreEdit() {
     if (!recovered) return;
     draft = copy(recovered.draft); revision = recovered.revision; publishKey = recovered.key;
+    editBase = recovered.base ? copy(recovered.base) :
+      recovered.revision === editorRecipe?.revision && editorRecipe
+        ? {revision: editorRecipe.revision, draft: recipeDraftFromRecipe(editorRecipe)}
+        : undefined;
     undo = recovered.undo ? copy(recovered.undo) : undefined; undoLines = {}; dirty = copy(recovered.ingredientLines || {}); recovered = null;
   }
   function discardRecoveredDraft() {
@@ -106,7 +116,8 @@
         if (recipeId) {
           const recipe = await request<Recipe>(`/recipes/${id(recipeId)}`, {signal: lifetime.signal}); if (!alive) return;
           editorRecipe = recipe; allowed = recipe.can_edit; revision = recipe.revision;
-          draft = Object.fromEntries(Object.keys(blank()).map(key => [key, recipe[key as keyof Recipe] ?? blank()[key as keyof RecipeDraft]])) as unknown as RecipeDraft;
+          draft = recipeDraftFromRecipe(recipe);
+          editBase = {revision: recipe.revision, draft: recipeDraftFromRecipe(recipe)};
           recovered = readLegacyDraft(recipeId); baseline = JSON.stringify(draft);
         } else {
           const migrated = migrateLegacyDraft(); legacyAvailable = !migrated && !!readLegacyDraft();
@@ -122,15 +133,15 @@
       if (activeId && !writing && JSON.stringify(readDraft(activeId)) !== lastSaved) { external = true; cancelWork(); }
     });
     const leave = (event: BeforeUnloadEvent) => {
-      if (editing && JSON.stringify(draft) !== baseline) { flush(); event.preventDefault(); event.returnValue = ''; }
+      if (!autosaveStopped && editing && JSON.stringify(draft) !== baseline) { flush(); event.preventDefault(); event.returnValue = ''; }
     };
     window.addEventListener('beforeunload', leave);
-    return () => { flush(); alive = false; lifetime.abort(); guard.cancel(); unsubscribe(); window.removeEventListener('beforeunload', leave); };
+    return () => { flush(); alive = false; lifetime.abort(); guard.cancel(); reviewGuard.cancel(); unsubscribe(); window.removeEventListener('beforeunload', leave); };
   });
   $effect(() => {
     // Only content dependencies schedule autosave; timestamps/status must not make a loop.
     JSON.stringify(draft); JSON.stringify(undo); JSON.stringify(dirty); draftName;
-    if (!ready || !allowed || !editing || recovered || external) return;
+    if (autosaveStopped || !ready || !allowed || !editing || recovered || external) return;
     const timer = setTimeout(flush, 350); return () => clearTimeout(timer);
   });
   function cancelWork() { guard.cancel(); parsing = false; busy = false; }
@@ -191,37 +202,153 @@
     } catch (e) { if (guard.accepts(version)) error = `${message(e)} Your text is safe; publish as written or try again.`; }
     finally { if (guard.accepts(version)) parsing = false; }
   }
+  async function prepareSaveCandidate(version: number, signal: AbortSignal): Promise<RecipeDraft | null> {
+    if (!draft.title.trim()) { error = 'Add a recipe title.'; return null; }
+    const invalidTags = tagError(draft.tags);
+    if (invalidTags) { error = invalidTags; return null; }
+    if (draft.source_url && !safeUrl(draft.source_url)) { error = 'The source link must begin with http:// or https://.'; return null; }
+    if (!hasIdentity) return null;
+    if (draft.mode === 'structured') {
+      try { await previewLines(version, signal); }
+      catch (e) { if (guard.accepts(version)) error = message(e); return null; }
+    }
+    if (!alive || !guard.accepts(version) || !hasIdentity) return null;
+    let candidate = withoutEmptyIngredients(copy(draft));
+    candidate.tags = normalizeTags(candidate.tags);
+    return copy(candidate);
+  }
+  async function refreshPermission() {
+    appState.identity = null;
+    try { await refreshIdentity(); } catch { /* Remain anonymous until identity can be checked. */ }
+    if (recipeId) allowed = false;
+  }
+  async function loadReview(candidate: RecipeDraft, announcement = '') {
+    if (!recipeId) return;
+    reviewGuard.cancel();
+    const reviewed = copy(candidate);
+    const {version, signal} = reviewGuard.start();
+    reviewEpoch += 1;
+    review = {status: 'loading', candidate: reviewed, error: announcement};
+    try {
+      const latest = await request<Recipe>(`/recipes/${id(recipeId)}`, {signal});
+      if (!alive || !reviewGuard.accepts(version)) return;
+      const permissionError = latest.can_edit ? announcement : 'You no longer have permission to replace this recipe.';
+      review = {status: 'ready', candidate: reviewed, latest, error: permissionError};
+    } catch (e) {
+      if (!alive || !reviewGuard.accepts(version)) return;
+      if (e instanceof ApiError && [401, 403].includes(e.status)) await refreshPermission();
+      const detail = e instanceof ApiError && e.status === 404
+        ? 'This recipe is unavailable. Your draft is still on this device.'
+        : `Could not load the latest recipe. ${message(e)}`;
+      review = {status: 'error', candidate: reviewed, error: detail};
+    }
+  }
+  async function completeSave(result: Recipe) {
+    autosaveStopped = true;
+    ready = false;
+    baseline = JSON.stringify(draft);
+    reviewGuard.cancel();
+    guard.cancel();
+    review = null;
+    const removed = activeId ? deleteDraft(activeId) : deleteLegacyDraft(recipeId);
+    if (!removed) {
+      completedRecipeId = result.id;
+      completionError = 'Recipe saved, but its local draft could not be removed.';
+      busy = false;
+      return;
+    }
+    if (alive) navigate(`/recipes/${id(result.id)}`);
+  }
+  async function saveCandidate(candidate: RecipeDraft, expectedRevision?: number): Promise<void> {
+    const {version, signal} = guard.start();
+    busy = true;
+    const replacing = !!review;
+    try {
+      const payload = Object.fromEntries(Object.keys(blank()).map(key => [key, candidate[key as keyof RecipeDraft]]));
+      const result = await mutate<Recipe>(recipeId ? `/recipes/${id(recipeId)}` : '/recipes',
+        {...payload, ...(recipeId ? {expected_revision: expectedRevision} : {})},
+        recipeId ? 'PUT' : 'POST', signal, recipeId ? undefined : publishKey);
+      if (!alive || !guard.accepts(version)) return;
+      await completeSave(result);
+    } catch (e) {
+      if (!alive || !guard.accepts(version)) return;
+      if (e instanceof ApiError && e.status === 409 && recipeId) {
+        needsReview = true;
+        error = '';
+        busy = false;
+        const changedAgain = replacing ? 'The recipe changed again. Review the updated comparison before replacing it.' : '';
+        const storageWarning = persisted.startsWith('Local storage is unavailable') ? persisted : '';
+        void loadReview(candidate, [changedAgain, storageWarning].filter(Boolean).join(' '));
+      } else {
+        if (e instanceof ApiError && [401, 403].includes(e.status)) await refreshPermission();
+        if (review) review = {...review, error: message(e)};
+        else error = message(e);
+      }
+    } finally {
+      if (alive && !autosaveStopped) {
+        busy = false;
+        flush();
+      }
+    }
+  }
   async function publish() {
     if (submitDisabled) return;
-    error = ''; conflict = false;
-    if (draft.source_url && !safeUrl(draft.source_url)) { error = 'The source link must begin with http:// or https://.'; return; }
-    flush(); if (external) return;
-    const {version, signal} = guard.start(); busy = true;
-    try {
-      if (draft.mode === 'structured') {
-        try { await previewLines(version, signal); }
-        catch (e) { if (guard.accepts(version)) error = message(e); return; }
-      }
-      if (!alive || !guard.accepts(version) || !hasIdentity) return;
-      let snapshot = copy(draft);
-      snapshot = withoutEmptyIngredients(snapshot); snapshot.tags = normalizeTags(snapshot.tags);
-      const payload = Object.fromEntries(Object.keys(blank()).map(key => [key, snapshot[key as keyof RecipeDraft]]));
-      const result = await mutate<Recipe>(recipeId ? `/recipes/${id(recipeId)}` : '/recipes', {...payload, ...(recipeId ? {expected_revision: revision} : {})}, recipeId ? 'PUT' : 'POST', signal, recipeId ? undefined : publishKey);
-      if (!alive || !guard.accepts(version)) return;
-      baseline = JSON.stringify(draft); ready = false;
-      const removed = activeId ? deleteDraft(activeId) : deleteLegacyDraft(recipeId);
-      if (!removed) { error = 'Recipe saved, but its local draft could not be removed.'; ready = true; return; }
-      navigate(`/recipes/${id(result.id)}`);
-    } catch (e) {
-      if (alive && guard.accepts(version)) {
-        error = message(e); conflict = e instanceof ApiError && e.status === 409;
-        if (e instanceof ApiError && [401, 403].includes(e.status)) {
-          appState.identity = null;
-          try { await refreshIdentity(); } catch { /* Remain anonymous until identity can be checked. */ }
-          if (recipeId) allowed = false;
-        }
-      }
-    } finally { if (alive && guard.accepts(version)) { busy = false; flush(); } }
+    error = ''; notice = '';
+    const persistedBeforeReview = flush();
+    if (external) return;
+    const {version, signal} = guard.start();
+    busy = true;
+    const candidate = await prepareSaveCandidate(version, signal);
+    if (!candidate || !alive || !guard.accepts(version)) {
+      if (alive && guard.accepts(version)) busy = false;
+      return;
+    }
+    if (needsReview && recipeId) {
+      busy = false;
+      await loadReview(candidate, persistedBeforeReview ? '' : persisted);
+      return;
+    }
+    await saveCandidate(candidate, recipeId ? revision : undefined);
+  }
+  async function replaceReviewed() {
+    if (!review?.latest?.can_edit || review.status !== 'ready' || busy) return;
+    await saveCandidate(copy(review.candidate), review.latest.revision);
+  }
+  async function backToEditing() {
+    reviewGuard.cancel();
+    review = null;
+    autosaveStopped = false;
+    await tick();
+    saveControl?.focus();
+  }
+  function retryReview() {
+    if (review) void loadReview(review.candidate);
+  }
+  function discardReviewed() {
+    if (!recipeId || busy) return;
+    busy = true;
+    autosaveStopped = true;
+    guard.cancel();
+    reviewGuard.cancel();
+    if (!deleteLegacyDraft(recipeId)) {
+      busy = false;
+      if (review) review = {...review, error: 'Could not discard this draft from this device. Keep this tab open and try again.'};
+      return;
+    }
+    baseline = JSON.stringify(draft);
+    ready = false;
+    navigate(`/recipes/${id(recipeId)}`);
+  }
+  function retryDraftRemoval() {
+    if (!completedRecipeId || busy) return;
+    busy = true;
+    const removed = activeId ? deleteDraft(activeId) : deleteLegacyDraft(recipeId);
+    busy = false;
+    if (removed) navigate(`/recipes/${id(completedRecipeId)}`);
+    else completionError = 'Recipe saved, but its local draft could not be removed. Keep this tab open and try again.';
+  }
+  function viewSavedRecipe() {
+    if (completedRecipeId) navigate(`/recipes/${id(completedRecipeId)}`);
   }
   function discardDraft() {
     cancelWork(); ready = false;
@@ -230,10 +357,25 @@
   }
 </script>
 
+{#if review}
+  {#key reviewEpoch}
+    <RecipeConflict base={editBase} candidate={review.candidate} latest={review.latest} status={review.status}
+      error={review.error} {busy} onretry={retryReview} onreplace={replaceReviewed}
+      ondiscard={discardReviewed} onback={backToEditing} />
+  {/key}
+{:else if completedRecipeId}
+  <section class="notice error" role="alert">
+    <h1>Recipe saved</h1>
+    <p>{completionError}</p>
+    <div class="toolbar">
+      <Button variant="primary" onclick={retryDraftRemoval} disabled={busy}>Retry draft removal</Button>
+      <Button variant="secondary" onclick={viewSavedRecipe}>View saved recipe</Button>
+    </div>
+  </section>
+{:else}
 <BackLink href={recipeId ? `/recipes/${id(recipeId)}` : '/'} label={recipeId ? 'Back to recipe' : 'Back to recipes'} />
 <h1>{recipeId ? 'Edit recipe' : 'Add a recipe'}</h1>
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
-{#if conflict}<section class="notice" role="alert"><h2>A newer version exists</h2><p>Your local draft is safe. Compare the current recipe before starting a fresh edit.</p><Button variant="secondary" size="sm" href={`/recipes/${id(recipeId!)}`} target="_blank" rel="noopener"><Icon name="git-compare" size={16} />Compare current recipe</Button></section>{/if}
 {#if !ready && !error}<Spinner label="Opening the editor…" />
 {:else if ready && !allowed}<p>You can read this recipe, but only its owner or an administrator can edit it. Your local draft has been kept.</p>
 {:else if ready}
@@ -310,10 +452,11 @@
       <p class="help" id={helpId}>{submitHelp}</p>
       <!-- The focusable group exposes help for the disabled child button. -->
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <Tooltip text={submitHelp}><span class="submit-wrapper" role="group" tabindex={submitDisabled ? 0 : -1} aria-label={submitHelp} aria-describedby={helpId}><button class="primary" type="submit" disabled={submitDisabled} aria-describedby={helpId}>{recipeId ? 'Save changes' : 'Publish recipe'}</button></span></Tooltip>
+      <Tooltip text={submitHelp}><span class="submit-wrapper" role="group" tabindex={submitDisabled ? 0 : -1} aria-label={submitHelp} aria-describedby={helpId}><button bind:this={saveControl} class="primary" type="submit" disabled={submitDisabled} aria-describedby={helpId}>{recipeId ? needsReview ? 'Review changes' : 'Save changes' : 'Publish recipe'}</button></span></Tooltip>
     </form>
     {/if}
   {/if}
+{/if}
 {/if}
 <style>
   .line-row{display:flex;align-items:center;gap:.25rem;margin:.4rem 0}.line-row label{flex:1;margin:0;min-width:0}.line-row input{width:100%}.ghost{display:inline-flex;align-items:center;gap:.3rem;background:transparent;border-color:transparent;padding:.35rem .5rem;font-size:.9rem}.toolbar{flex-wrap:wrap}.draft-actions{margin-bottom:1rem}.draft-badge{font-size:.85rem;color:var(--muted)}.draft-recovery{border-style:dashed;max-width:32rem}.draft-recovery h2{margin-top:0}.draft-recovery-description{margin:.25rem 0;color:var(--muted);font-weight:600}.draft-list{list-style:none;padding:0}.draft-list li{display:flex;justify-content:space-between;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--border)}.draft-list small{display:block}.submit-wrapper{display:inline-flex}.submit-wrapper:focus-visible{outline:2px solid currentColor;outline-offset:4px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}

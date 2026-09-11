@@ -51,9 +51,15 @@ describe('safe legacy migration', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {});
     expect(migrateLegacyDraft()).toBe(false); expect(localStorage.getItem('notebook:draft:new')).toBe(raw);
   });
-  it('keeps edit drafts revision-bound and out of the new-draft list', () => {
+  it('keeps edit drafts revision-bound, validates optional bases, and preserves older records', () => {
+    const valid = {...old(), revision:1, base:{revision:1, draft:{...blank(), title:'Original'}}};
+    localStorage.setItem('notebook:draft:r1', JSON.stringify(valid));
+    expect(readLegacyDraft('r1')?.base).toEqual(valid.base); expect(listDrafts()).toEqual([]);
+    localStorage.setItem('notebook:draft:r1', JSON.stringify({...valid, base:{...valid.base, revision:2}}));
+    expect(readLegacyDraft('r1')).toMatchObject({revision:1, draft:valid.draft});
+    expect(readLegacyDraft('r1')?.base).toBeUndefined();
     localStorage.setItem('notebook:draft:r1', JSON.stringify({...old(), revision:1}));
-    expect(readLegacyDraft('r1')?.revision).toBe(1); expect(listDrafts()).toEqual([]);
+    expect(readLegacyDraft('r1')?.base).toBeUndefined();
     localStorage.setItem('notebook:draft:r1', JSON.stringify(old())); expect(readLegacyDraft('r1')).toBeNull();
   });
 });
