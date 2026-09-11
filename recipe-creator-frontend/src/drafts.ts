@@ -1,4 +1,5 @@
 import { blank } from './recipe';
+import { recipeDraftChangeSize } from './recipe-diff';
 import type { RecipeDraft } from './types';
 
 export interface DraftSummary { id: string; name: string; updatedAt: string }
@@ -21,6 +22,8 @@ export interface LegacyDraft {
 const prefix = 'notebook:draft:v2:';
 const legacyKey = 'notebook:draft:new';
 const changed = 'notebook:drafts-changed';
+export const EDIT_DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+export const SIGNIFICANT_DRAFT_CHANGE_SIZE = 100;
 const validId = (id: string) => /^(?:legacy-new|[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})$/i.test(id);
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string';
@@ -110,6 +113,13 @@ export function readLegacyDraft(recipeId?: string): LegacyDraft | null {
       : undefined;
     return {...draft, ...(base ? {base} : {})} as unknown as LegacyDraft;
   } catch { return null; }
+}
+export function readEditDraft(recipeId: string, current: {revision: number; draft: RecipeDraft}, now = Date.now()): LegacyDraft | null {
+  const value = readLegacyDraft(recipeId);
+  if (!value || now - Date.parse(value.saved) <= EDIT_DRAFT_MAX_AGE_MS) return value;
+  const original = value.base?.draft ?? (value.revision === current.revision ? current.draft : undefined);
+  if (!original || recipeDraftChangeSize(original, value.draft) >= SIGNIFICANT_DRAFT_CHANGE_SIZE) return value;
+  return deleteLegacyDraft(recipeId) ? null : value;
 }
 function migrated(value: LegacyDraft, id: string): LocalDraft {
   return {version: 2, id, name: nameOf(value.draft.title.trim() ? value.draft.title : 'Recovered recipe'), updatedAt: value.saved,

@@ -1,9 +1,10 @@
-import { structuredPatch } from 'diff';
+import { diffChars, structuredPatch } from 'diff';
 import type { StructuredPatchHunk } from 'diff';
 import type { RecipeDraft } from './types';
 
 export type RecipeDiffSection = {key: keyof RecipeDraft; label: string; text: string};
 export type RecipeDiffHunk = {range: string; lines: {kind: 'context' | 'addition' | 'removal' | 'marker'; text: string}[]};
+export type RecipeDraftDiff = {key: keyof RecipeDraft; label: string; hunks: RecipeDiffHunk[]};
 
 const fields: {key: keyof RecipeDraft; label: string}[] = [
   {key: 'title', label: 'Title'},
@@ -45,6 +46,23 @@ export function recipeDiffSections(draft: RecipeDraft): RecipeDiffSection[] {
     return {key, label, text};
   });
 }
+export function recipeDraftDiff(original: RecipeDraft, changed: RecipeDraft): RecipeDraftDiff[] {
+  const originalSections = recipeDiffSections(original);
+  return recipeDiffSections(changed).map((section, index) => ({
+    key: section.key,
+    label: section.label,
+    hunks: recipeTextDiff(originalSections[index].text, section.text),
+  }));
+}
+
+// Inserted and deleted characters are a stable measure across prose and structured fields.
+export function recipeDraftChangeSize(original: RecipeDraft, changed: RecipeDraft): number {
+  const originalSections = recipeDiffSections(original);
+  return recipeDiffSections(changed).reduce((total, section, index) =>
+    total + diffChars(originalSections[index].text, section.text)
+      .reduce((size, part) => size + (part.added || part.removed ? part.value.length : 0), 0), 0);
+}
+
 
 function lineKind(line: string): RecipeDiffHunk['lines'][number]['kind'] {
   if (line.startsWith('+')) return 'addition';

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { blank } from './recipe';
-import { createDraft, deleteDraft, draftHref, listDrafts, migrateLegacyDraft, readDraft, readLegacyDraft, recoverLegacyDraft, renameDraft, saveDraft, subscribeDrafts } from './drafts';
+import { createDraft, deleteDraft, draftHref, EDIT_DRAFT_MAX_AGE_MS, listDrafts, migrateLegacyDraft, readDraft, readEditDraft, readLegacyDraft, recoverLegacyDraft, renameDraft, saveDraft, SIGNIFICANT_DRAFT_CHANGE_SIZE, subscribeDrafts } from './drafts';
 
 beforeEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
 describe('independent local drafts', () => {
@@ -27,6 +27,36 @@ describe('independent local drafts', () => {
   it('returns an in-memory draft when storage is blocked', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
     const a = createDraft('Safe'); expect(a.draft.mode).toBe('text'); expect(saveDraft(a)).toBe(false); expect(a.name).toBe('Safe');
+  });
+});
+describe('edit draft retention', () => {
+  const now = Date.parse('2026-09-11T12:00:00.000Z');
+  const base = {...blank('structured'), title: 'Soup', directions: 'Simmer gently.'};
+  const store = (draft: typeof base, saved: string) => localStorage.setItem('notebook:draft:r1', JSON.stringify({
+    draft, revision: 2, key: 'edit-key', saved, base: {revision: 2, draft: base},
+  }));
+
+  it('expires an old insignificant edit but retains recent and significant edits', () => {
+    const old = new Date(now - EDIT_DRAFT_MAX_AGE_MS - 1).toISOString();
+    store({...base, title: 'Soups'}, old);
+    expect(readEditDraft('r1', {revision: 2, draft: base}, now)).toBeNull();
+    expect(localStorage.getItem('notebook:draft:r1')).toBeNull();
+
+    store({...base, title: 'Soups'}, new Date(now - EDIT_DRAFT_MAX_AGE_MS).toISOString());
+    expect(readEditDraft('r1', {revision: 2, draft: base}, now)?.draft.title).toBe('Soups');
+
+    store({...base, directions: base.directions + 'x'.repeat(SIGNIFICANT_DRAFT_CHANGE_SIZE)}, old);
+    expect(readEditDraft('r1', {revision: 2, draft: base}, now)?.draft.directions).toHaveLength(base.directions.length + SIGNIFICANT_DRAFT_CHANGE_SIZE);
+  });
+
+  it('retains old edits when their original revision is unavailable or deletion fails', () => {
+    const old = new Date(now - EDIT_DRAFT_MAX_AGE_MS - 1).toISOString();
+    localStorage.setItem('notebook:draft:r1', JSON.stringify({draft: {...base, title: 'Soups'}, revision: 1, key: 'edit-key', saved: old}));
+    expect(readEditDraft('r1', {revision: 2, draft: base}, now)?.draft.title).toBe('Soups');
+
+    store({...base, title: 'Soups'}, old);
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('blocked'); });
+    expect(readEditDraft('r1', {revision: 2, draft: base}, now)?.draft.title).toBe('Soups');
   });
 });
 describe('safe legacy migration', () => {

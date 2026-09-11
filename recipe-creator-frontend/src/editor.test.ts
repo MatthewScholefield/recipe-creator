@@ -37,6 +37,24 @@ it('puts the searchable author field at the bottom of existing recipe edits for 
   expect(author).toHaveValue('Cook');
   expect(screen.queryByText('Change author')).not.toBeInTheDocument();
 });
+it('discards an in-progress edit beside the save action without recreating its draft', async () => {
+  mockApi(() => recipe);
+  const navigate = vi.fn();
+  const view = render(Editor,{recipeId:'r1',navigate});
+  await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Changed locally'}});
+  await waitFor(() => expect(localStorage.getItem('notebook:draft:r1')).not.toBeNull());
+  const saveButton = screen.getByRole('button',{name:'Save changes'});
+  const discardButton = screen.getByRole('button',{name:'Discard changes'});
+  expect(saveButton).toBeEnabled();
+  await fireEvent.click(discardButton);
+  expect(screen.getByRole('heading',{name:'Discard your changes?'})).toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Confirm discard'}));
+  expect(localStorage.getItem('notebook:draft:r1')).toBeNull();
+  expect(navigate).toHaveBeenCalledWith('/recipes/r1');
+  view.unmount();
+  expect(localStorage.getItem('notebook:draft:r1')).toBeNull();
+});
+
 
 it('opens a nonblocking draft chooser without creating an empty draft and starts in text', async () => {
   mockApi(() => recipe); const first = localDraft(); localStorage.setItem('notebook:editor-mode', '"structured"');

@@ -2,8 +2,9 @@
   import { onMount, tick } from 'svelte';
   import Button from './ui/Button.svelte';
   import Spinner from './ui/Spinner.svelte';
+  import RecipeDiffPanel from './RecipeDiffPanel.svelte';
   import { recipeDraftFromRecipe } from './recipe';
-  import { recipeDiffSections, recipeTextDiff, type RecipeDiffHunk } from './recipe-diff';
+  import { recipeDraftDiff, type RecipeDiffHunk } from './recipe-diff';
   import type { Recipe, RecipeDraft } from './types';
 
   type Base = {revision: number; draft: RecipeDraft};
@@ -28,20 +29,20 @@
   let confirmation = $state<'replace' | 'discard' | null>(null);
   const comparison = $derived.by<Comparison[]>(() => {
     if (!latest) return [];
-    const candidateSections = recipeDiffSections(candidate);
-    const latestSections = recipeDiffSections(recipeDraftFromRecipe(latest));
-    if (!base) return candidateSections.map((section, index) => ({
-      key: section.key,
-      label: section.label,
-      left: recipeTextDiff(latestSections[index].text, section.text),
+    const latestDraft = recipeDraftFromRecipe(latest);
+    const candidateDiff = recipeDraftDiff(base?.draft ?? latestDraft, candidate);
+    if (!base) return candidateDiff.map(field => ({
+      key: field.key,
+      label: field.label,
+      left: field.hunks,
       right: [],
     }));
-    const baseSections = recipeDiffSections(base.draft);
-    return candidateSections.map((section, index) => ({
-      key: section.key,
-      label: section.label,
-      left: recipeTextDiff(baseSections[index].text, section.text),
-      right: recipeTextDiff(baseSections[index].text, latestSections[index].text),
+    const latestDiff = recipeDraftDiff(base.draft, latestDraft);
+    return candidateDiff.map((field, index) => ({
+      key: field.key,
+      label: field.label,
+      left: field.hunks,
+      right: latestDiff[index].hunks,
     }));
   });
   const visible = $derived(showUnchanged ? comparison : comparison.filter(field => field.left.length || field.right.length));
@@ -82,23 +83,9 @@
         <section class="field">
           <h2>{field.label}</h2>
           <div class="panels">
-            <div class="panel" aria-label={base ? `Your changes to ${field.label}` : `${field.label}: latest saved recipe to your draft`}>
-              {#if field.left.length}
-                {#each field.left as hunk}
-                  <pre class="range">{hunk.range}</pre>
-                  {#each hunk.lines as line}<pre class:added={line.kind === 'addition'} class:removed={line.kind === 'removal'} class:marker={line.kind === 'marker'}>{line.text}</pre>{/each}
-                {/each}
-              {:else}<p class="no-change">No changes in this field</p>{/if}
-            </div>
+            <RecipeDiffPanel hunks={field.left} ariaLabel={base ? `Your changes to ${field.label}` : `${field.label}: latest saved recipe to your draft`} mobileLabel />
             {#if base}
-              <div class="panel" aria-label={`Saved changes to ${field.label}`}>
-                {#if field.right.length}
-                  {#each field.right as hunk}
-                    <pre class="range">{hunk.range}</pre>
-                    {#each hunk.lines as line}<pre class:added={line.kind === 'addition'} class:removed={line.kind === 'removal'} class:marker={line.kind === 'marker'}>{line.text}</pre>{/each}
-                  {/each}
-                {:else}<p class="no-change">No changes in this field</p>{/if}
-              </div>
+              <RecipeDiffPanel hunks={field.right} ariaLabel={`Saved changes to ${field.label}`} mobileLabel />
             {/if}
           </div>
         </section>
@@ -128,6 +115,6 @@
 </section>
 
 <style>
-  .conflict-review{display:grid;gap:1rem}.conflict-review h1:focus{outline:2px solid var(--ui-accent);outline-offset:.25rem}.unchanged-toggle{display:flex;align-items:center;gap:.5rem}.unchanged-toggle input{width:auto}.column-labels,.panels{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem}.column-labels{position:sticky;top:0;z-index:1;padding:.75rem;background:var(--ui-surface-muted);border:1px solid var(--line);border-radius:.5rem}.fields{display:grid;gap:1.25rem}.field{min-width:0}.field h2{margin:0 0 .45rem;font-size:1.05rem}.panel{min-width:0;padding:.65rem;border:1px solid var(--line);border-radius:.5rem;background:var(--paper);overflow:hidden}.panel pre{margin:0;padding:.05rem .4rem;white-space:pre-wrap;overflow-wrap:anywhere;font:0.85rem/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}.panel .range{margin:.25rem 0;color:var(--muted);font-weight:700}.added{background:#e3f3e5;color:#174d24}.removed{background:#f9e3e0;color:#79281f}.marker{color:var(--muted);font-style:italic}.no-change,.side-summary{color:var(--muted)}.actions{display:flex;flex-wrap:wrap;gap:.75rem}.confirmation{max-width:44rem}.confirmation h2{margin-top:0}.direct .panels{grid-template-columns:minmax(0,1fr)}.direct-label{font-size:1.1rem}
-  @media(max-width:48rem){.column-labels{display:none}.panels{grid-template-columns:1fr}.panel::before{display:block;margin-bottom:.45rem;font-weight:700;content:attr(aria-label)}.actions :global(.ui-button){width:100%}}
+  .conflict-review{display:grid;gap:1rem}.conflict-review h1:focus{outline:2px solid var(--ui-accent);outline-offset:.25rem}.unchanged-toggle{display:flex;align-items:center;gap:.5rem}.unchanged-toggle input{width:auto}.column-labels,.panels{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem}.column-labels{position:sticky;top:0;z-index:1;padding:.75rem;background:var(--ui-surface-muted);border:1px solid var(--line);border-radius:.5rem}.fields{display:grid;gap:1.25rem}.field{min-width:0}.field h2{margin:0 0 .45rem;font-size:1.05rem}.side-summary{color:var(--muted)}.actions{display:flex;flex-wrap:wrap;gap:.75rem}.confirmation{max-width:44rem}.confirmation h2{margin-top:0}.direct .panels{grid-template-columns:minmax(0,1fr)}.direct-label{font-size:1.1rem}
+  @media(max-width:48rem){.column-labels{display:none}.panels{grid-template-columns:1fr}.actions :global(.ui-button){width:100%}}
 </style>

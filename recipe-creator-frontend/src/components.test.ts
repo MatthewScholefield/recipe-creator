@@ -46,6 +46,9 @@ it('shows a recovered edit as a card and removes it after submission', async () 
   expect(await screen.findByRole('heading',{name:'Restore draft?'})).toBeInTheDocument();
   expect(screen.getByText('Recovered soup')).toBeInTheDocument();
   expect(screen.getByText('You edited')).toBeInTheDocument();
+  expect(screen.getByRole('heading',{name:'Changes in this draft'})).toBeInTheDocument();
+  expect(screen.getByLabelText('Draft changes to Title')).toHaveTextContent('-Soup');
+  expect(screen.getByLabelText('Draft changes to Title')).toHaveTextContent('+Recovered soup');
   expect(screen.queryByLabelText('Recipe title')).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Edit draft'}));
   expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue('  exact draft\n\n');

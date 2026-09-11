@@ -6,7 +6,7 @@
   import { blank, ingredient, formatRecipe, applyParse, ParseGuard, move, ingredientLine, changedIngredient,
     dirtyIngredientLines, applyIngredientLines, withoutEmptyIngredients, normalizeTags, recipeDraftFromRecipe, tagError, MEAL_CLASSIFIERS } from './recipe';
   import { createDraft, saveDraft, readDraft, listDrafts, deleteDraft, deleteLegacyDraft, draftHref, subscribeDrafts,
-    migrateLegacyDraft, readLegacyDraft, recoverLegacyDraft, type LocalDraft, type LegacyDraft, type DraftSummary } from './drafts';
+    migrateLegacyDraft, readLegacyDraft, readEditDraft, recoverLegacyDraft, type LocalDraft, type LegacyDraft, type DraftSummary } from './drafts';
   import IdentityPrompt from './IdentityPrompt.svelte';
   import AuthorPicker from './AuthorPicker.svelte';
   import TagPicker from './ui/TagPicker.svelte';
@@ -17,6 +17,8 @@
   import Button from './ui/Button.svelte';
   import BackLink from './ui/BackLink.svelte';
   import RecipeConflict from './RecipeConflict.svelte';
+  import RecipeDiffPanel from './RecipeDiffPanel.svelte';
+  import { recipeDraftDiff } from './recipe-diff';
   import type { Recipe, RecipeDraft, ParseResult, IngredientGroup, IngredientLinesResult, TagCatalog } from './types';
 
   let { recipeId, draftId, navigate }: {recipeId?: string; draftId?: string; navigate: (path: string, options?: {replace?: boolean}) => void} = $props();
@@ -32,7 +34,7 @@
   let needsReview = $state(false);
   let review = $state<null | {status: 'loading' | 'ready' | 'error'; candidate: RecipeDraft; latest?: Recipe; error: string}>(null);
   let reviewEpoch = $state(0), completedRecipeId = $state(''), completionError = $state('');
-  let activeId = $state(''), draftName = $state(''), naming = $state(false), textChoice = $state(false), discard = $state(false);
+  let activeId = $state(''), draftName = $state(''), naming = $state(false), textChoice = $state(false), discard = $state(false), discardChanges = $state(false);
   let drafts = $state<DraftSummary[]>([]), legacyAvailable = $state(false), recovered = $state<LegacyDraft | null>(null);
   let tags = $state<string[]>([...MEAL_CLASSIFIERS]), tagsError = $state('');
   let publishKey: string = crypto.randomUUID(), baseline = '', lastSaved: string | null = null, alive = true, writing = false;
@@ -45,6 +47,11 @@
   let submitHelp = $derived(!hasIdentity ? `Set your name to ${recipeId ? 'save changes' : 'publish'}` :
     external ? 'Reload or save as a new draft before publishing.' : validation || (!draft.title.trim() ? 'Add a recipe title.' : busy ? 'Saving your recipe…' : parsing ? 'Wait for organization or cancel it.' : needsReview ? 'Prepare and review your changes against the latest recipe.' : 'Ready to save.'));
   let submitDisabled = $derived(!hasIdentity || !ready || !allowed || busy || parsing || !!recovered || external || !draft.title.trim() || !!validation);
+  let recoveredDiff = $derived.by(() => {
+    if (!recovered || !editorRecipe) return [];
+    const original = recovered.base?.draft ?? recipeDraftFromRecipe(editorRecipe);
+    return recipeDraftDiff(original, recovered.draft).filter(field => field.hunks.length);
+  });
 
   function resume(value: LocalDraft) {
     guard.cancel(); parsing = false; busy = false;
@@ -104,6 +111,17 @@
     if (!deleteLegacyDraft(recipeId)) { error = 'Could not discard this draft. Please try again.'; return; }
     recovered = null; baseline = JSON.stringify(draft); notice = 'Draft discarded. You are editing the current recipe.';
   }
+  function discardEditChanges() {
+    if (!recipeId) return;
+    autosaveStopped = true; cancelWork();
+    if (!deleteLegacyDraft(recipeId)) {
+      autosaveStopped = false; discardChanges = false;
+      error = 'Could not discard your changes. Keep this tab open and try again.';
+      return;
+    }
+    baseline = JSON.stringify(draft); ready = false;
+    navigate(`/recipes/${id(recipeId)}`);
+  }
   async function fetchTags() {
     try { const catalog = await request<TagCatalog>('/tags', {signal: lifetime.signal}); if (alive) { tags = normalizeTags([...MEAL_CLASSIFIERS, ...catalog.tags]); tagsError = ''; } }
     catch (e) { if (alive) tagsError = `Tags could not be loaded. ${message(e)}`; }
@@ -116,9 +134,10 @@
         if (recipeId) {
           const recipe = await request<Recipe>(`/recipes/${id(recipeId)}`, {signal: lifetime.signal}); if (!alive) return;
           editorRecipe = recipe; allowed = recipe.can_edit; revision = recipe.revision;
-          draft = recipeDraftFromRecipe(recipe);
-          editBase = {revision: recipe.revision, draft: recipeDraftFromRecipe(recipe)};
-          recovered = readLegacyDraft(recipeId); baseline = JSON.stringify(draft);
+          const currentDraft = recipeDraftFromRecipe(recipe);
+          draft = currentDraft;
+          editBase = {revision: recipe.revision, draft: copy(currentDraft)};
+          recovered = readEditDraft(recipeId, {revision: recipe.revision, draft: currentDraft}); baseline = JSON.stringify(draft);
         } else {
           const migrated = migrateLegacyDraft(); legacyAvailable = !migrated && !!readLegacyDraft();
           if (!migrated && !legacyAvailable) notice = 'An old draft could not be read. Its stored copy has been kept.';
@@ -393,6 +412,17 @@
         <h2 id="restore-draft-heading">Restore draft?</h2>
         <p class="draft-recovery-description">{recovered.draft.title.trim() || 'Untitled recipe'}</p>
         <PhotoDate createdAt={recovered.saved} label="You edited" />
+        <section class="draft-diff" aria-labelledby="draft-diff-heading">
+          <h3 id="draft-diff-heading">Changes in this draft</h3>
+          <p class="help">{recovered.base ? 'Compared with the recipe when you started editing.' : 'Compared with the current saved recipe.'}</p>
+          {#if recoveredDiff.length}
+            <div class="draft-diff-fields">
+              {#each recoveredDiff as field (field.key)}
+                <section><h4>{field.label}</h4><RecipeDiffPanel hunks={field.hunks} ariaLabel={`Draft changes to ${field.label}`} compact /></section>
+              {/each}
+            </div>
+          {:else}<p>No editable content changes.</p>{/if}
+        </section>
         <div class="toolbar"><Button variant="primary" onclick={restoreEdit}><Icon name="edit" size={16} />Edit draft</Button><Button variant="danger" onclick={discardRecoveredDraft}><Icon name="trash" size={16} />Discard draft</Button></div>
       </section>
     {:else}
@@ -449,10 +479,20 @@
       {#if busy}<div class="toolbar"><Spinner label="Saving recipe…" /><button type="button" onclick={() => {cancelWork(); notice = 'Save cancelled. Your draft is retained; retry uses the same publishing key.';}}>Cancel saving</button></div>{/if}
       {#if notice}<p role="status" class="notice">{notice}</p>{/if}
       {#if !hasIdentity}<IdentityPrompt onready={(value) => {appState.identity = value; notice = 'Name set. Review your recipe, then publish.';}} />{/if}
+      {#if discardChanges}
+        <section class="notice" aria-labelledby="discard-changes-heading">
+          <h2 id="discard-changes-heading">Discard your changes?</h2>
+          <p>The saved recipe will not change.</p>
+          <div class="toolbar"><Button variant="danger" onclick={discardEditChanges}>Confirm discard</Button><Button variant="secondary" onclick={() => discardChanges = false}>Keep editing</Button></div>
+        </section>
+      {/if}
       <p class="help" id={helpId}>{submitHelp}</p>
-      <!-- The focusable group exposes help for the disabled child button. -->
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <Tooltip text={submitHelp}><span class="submit-wrapper" role="group" tabindex={submitDisabled ? 0 : -1} aria-label={submitHelp} aria-describedby={helpId}><button bind:this={saveControl} class="primary" type="submit" disabled={submitDisabled} aria-describedby={helpId}>{recipeId ? needsReview ? 'Review changes' : 'Save changes' : 'Publish recipe'}</button></span></Tooltip>
+      <div class="save-actions">
+        <!-- The focusable group exposes help for the disabled child button. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <Tooltip text={submitHelp}><span class="submit-wrapper" role="group" tabindex={submitDisabled ? 0 : -1} aria-label={submitHelp} aria-describedby={helpId}><button bind:this={saveControl} class="primary" type="submit" disabled={submitDisabled} aria-describedby={helpId}>{recipeId ? needsReview ? 'Review changes' : 'Save changes' : 'Publish recipe'}</button></span></Tooltip>
+        {#if recipeId && !recovered}<Button variant="danger" disabled={busy} onclick={() => discardChanges = true}><Icon name="trash" size={16} />Discard changes</Button>{/if}
+      </div>
     </form>
     {/if}
   {/if}
@@ -460,5 +500,6 @@
 {/if}
 <style>
   .line-row{display:flex;align-items:center;gap:.25rem;margin:.4rem 0}.line-row label{flex:1;margin:0;min-width:0}.line-row input{width:100%}.ghost{display:inline-flex;align-items:center;gap:.3rem;background:transparent;border-color:transparent;padding:.35rem .5rem;font-size:.9rem}.toolbar{flex-wrap:wrap}.draft-actions{margin-bottom:1rem}.draft-badge{font-size:.85rem;color:var(--muted)}.draft-recovery{border-style:dashed;max-width:32rem}.draft-recovery h2{margin-top:0}.draft-recovery-description{margin:.25rem 0;color:var(--muted);font-weight:600}.draft-list{list-style:none;padding:0}.draft-list li{display:flex;justify-content:space-between;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--border)}.draft-list small{display:block}.submit-wrapper{display:inline-flex}.submit-wrapper:focus-visible{outline:2px solid currentColor;outline-offset:4px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  .draft-diff{margin:1rem 0;padding-top:.75rem;border-top:1px solid var(--line)}.draft-diff h3,.draft-diff h4{margin:.25rem 0}.draft-diff h4{font-size:.95rem}.draft-diff-fields{display:grid;gap:.75rem}.save-actions{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
   form input:not([type=checkbox]),form textarea{font-weight:400}
 </style>
