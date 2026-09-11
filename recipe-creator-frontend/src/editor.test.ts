@@ -58,12 +58,12 @@ it('discards an in-progress edit beside the save action without recreating its d
 
 it('opens a nonblocking draft chooser without creating an empty draft and starts in text', async () => {
   mockApi(() => recipe); const first = localDraft(); localStorage.setItem('notebook:editor-mode', '"structured"');
-  const navigate = vi.fn(); render(Editor,{navigate});
+  const navigate = vi.fn(); const view = render(Editor,{navigate});
   await screen.findByRole('button',{name:'Start a new recipe'}); expect(listDrafts()).toHaveLength(1);
   expect(screen.getByRole('link',{name:'Resume Soup'})).toHaveAttribute('href',`/new?draft=${first.id}`);
   await fireEvent.click(screen.getByRole('button',{name:'Start a new recipe'}));
   expect(await screen.findByLabelText('Paste or write your recipe')).toHaveValue('');
-  expect(listDrafts()).toHaveLength(2); await waitFor(() => expect(navigate).toHaveBeenCalledWith(expect.stringMatching(/^\/new\?draft=/),{replace:true}));
+  view.unmount(); expect(listDrafts()).toHaveLength(1); expect(navigate).not.toHaveBeenCalled();
 });
 it('does not substitute another draft for a missing draft URL', async () => {
   mockApi(() => recipe); localDraft(); render(Editor,{draftId:crypto.randomUUID(),navigate:vi.fn()});
@@ -192,7 +192,9 @@ it('keeps an in-memory editor open if starting a draft cannot persist', async ()
   mockApi(() => recipe); vi.spyOn(Storage.prototype,'setItem').mockImplementation(() => {throw new Error('quota');});
   const navigate = vi.fn(); render(Editor,{navigate}); await fireEvent.click(await screen.findByRole('button',{name:'Start a new recipe'}));
   expect(await screen.findByLabelText('Paste or write your recipe')).toBeInTheDocument();
-  expect(screen.getByText(/Local storage is unavailable/)).toBeInTheDocument(); expect(navigate).not.toHaveBeenCalled();
+  expect(screen.queryByText(/Local storage is unavailable/)).not.toBeInTheDocument();
+  await fireEvent.input(screen.getByLabelText('Recipe title'),{target:{value:'Soup'}});
+  expect(await screen.findByText(/Local storage is unavailable/)).toBeInTheDocument(); expect(navigate).not.toHaveBeenCalled();
 });
 it('requires a choice before formatting source and can undo back to exact original text', async () => {
   const value = localDraft(true); value.draft.source_text = '  Original source\n'; saveDraft(value); mockApi(() => recipe);

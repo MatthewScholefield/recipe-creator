@@ -37,7 +37,7 @@
   let activeId = $state(''), draftName = $state(''), naming = $state(false), textChoice = $state(false), discard = $state(false), discardChanges = $state(false);
   let drafts = $state<DraftSummary[]>([]), legacyAvailable = $state(false), recovered = $state<LegacyDraft | null>(null);
   let tags = $state<string[]>([...MEAL_CLASSIFIERS]), tagsError = $state('');
-  let publishKey: string = crypto.randomUUID(), baseline = '', lastSaved: string | null = null, alive = true, writing = false;
+  let publishKey: string = crypto.randomUUID(), baseline = '', baselineName = '', lastSaved: string | null = null, alive = true, writing = false;
   let autosaveStopped = false, saveControl = $state<HTMLButtonElement>();
   const guard = new ParseGuard(), reviewGuard = new ParseGuard(), lifetime = new AbortController();
   const inputs = new Map<string, HTMLInputElement>();
@@ -57,10 +57,11 @@
     guard.cancel(); parsing = false; busy = false;
     activeId = value.id; draftName = value.name; draft = copy(value.draft); undo = value.undo ? copy(value.undo) : undefined;
     dirty = copy(value.ingredientLines || {}); undoLines = {}; publishKey = value.publishKey;
-    baseline = JSON.stringify(draft); lastSaved = JSON.stringify(readDraft(value.id)); external = false; error = '';
+    baseline = JSON.stringify(draft); baselineName = value.name; lastSaved = JSON.stringify(readDraft(value.id)); external = false; error = '';
   }
-  function flush() {
+  function flush(force = false) {
     if (autosaveStopped || !ready || !allowed || !editing || recovered || external) return false;
+    if (!force && JSON.stringify(draft) === baseline && draftName === baselineName) return false;
     if (activeId && !writing && JSON.stringify(readDraft(activeId)) !== lastSaved) {
       external = true; cancelWork(); return false;
     }
@@ -69,7 +70,7 @@
     writing = true;
     if (activeId) {
       const local: LocalDraft = {...value, version: 2, id: activeId, name: draftName.trim().slice(0, 120) || 'Untitled recipe', updatedAt: new Date().toISOString(), publishKey};
-      ok = saveDraft(local); if (ok) lastSaved = JSON.stringify(local);
+      ok = saveDraft(local); if (ok) { lastSaved = JSON.stringify(local); baselineName = local.name; }
     } else ok = save(storageKey, {...value, revision, ...(recipeId && editBase ? {base: copy(editBase)} : {}), key: publishKey, saved: new Date().toISOString()});
     writing = false;
     persisted = ok ? 'Draft saved on this device.' : 'Local storage is unavailable. Keep this tab open or copy your recipe before leaving.';
@@ -77,15 +78,13 @@
   }
   async function startNew() {
     if (busy) return;
-    flush(); const value = createDraft(); resume(value); ready = true;
-    const ok = flush(); await tick();
-    if (ok && alive) navigate(draftHref(value.id), {replace: true});
+    const value = createDraft(undefined, false); resume(value); ready = true; await tick();
   }
   async function fork() {
     const snapshot = copy(draft), previous = undo ? copy(undo) : undefined, lines = copy(dirty);
-    const value = createDraft(draftName || draft.title);
+    const value = createDraft(draftName || draft.title, false);
     resume({...value, draft: snapshot, undo: previous, ingredientLines: lines});
-    const ok = flush(); await tick();
+    const ok = flush(true); await tick();
     if (ok && alive) navigate(draftHref(value.id), {replace: true});
   }
   function reloadLocal() {
@@ -152,7 +151,7 @@
       if (activeId && !writing && JSON.stringify(readDraft(activeId)) !== lastSaved) { external = true; cancelWork(); }
     });
     const leave = (event: BeforeUnloadEvent) => {
-      if (!autosaveStopped && editing && JSON.stringify(draft) !== baseline) { flush(); event.preventDefault(); event.returnValue = ''; }
+      if (!autosaveStopped && editing && (JSON.stringify(draft) !== baseline || draftName !== baselineName)) { flush(); event.preventDefault(); event.returnValue = ''; }
     };
     window.addEventListener('beforeunload', leave);
     return () => { flush(); alive = false; lifetime.abort(); guard.cancel(); reviewGuard.cancel(); unsubscribe(); window.removeEventListener('beforeunload', leave); };

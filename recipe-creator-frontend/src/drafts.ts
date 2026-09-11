@@ -72,9 +72,9 @@ export function listDrafts(): DraftSummary[] {
   } catch { /* Storage may be unavailable; in-memory editing still works. */ }
   return result.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id));
 }
-export function createDraft(name?: string): LocalDraft {
+export function createDraft(name?: string, persist = true): LocalDraft {
   const value: LocalDraft = {version: 2, id: crypto.randomUUID(), name: nameOf(name), updatedAt: new Date().toISOString(), draft: blank('text'), publishKey: crypto.randomUUID()};
-  saveDraft(value);
+  if (persist) saveDraft(value);
   return value;
 }
 export function saveDraft(value: LocalDraft): boolean {
@@ -116,8 +116,13 @@ export function readLegacyDraft(recipeId?: string): LegacyDraft | null {
 }
 export function readEditDraft(recipeId: string, current: {revision: number; draft: RecipeDraft}, now = Date.now()): LegacyDraft | null {
   const value = readLegacyDraft(recipeId);
-  if (!value || now - Date.parse(value.saved) <= EDIT_DRAFT_MAX_AGE_MS) return value;
+  if (!value) return null;
   const original = value.base?.draft ?? (value.revision === current.revision ? current.draft : undefined);
+  if (original && recipeDraftChangeSize(original, value.draft) === 0) {
+    deleteLegacyDraft(recipeId);
+    return null;
+  }
+  if (now - Date.parse(value.saved) <= EDIT_DRAFT_MAX_AGE_MS) return value;
   if (!original || recipeDraftChangeSize(original, value.draft) >= SIGNIFICANT_DRAFT_CHANGE_SIZE) return value;
   return deleteLegacyDraft(recipeId) ? null : value;
 }

@@ -30,10 +30,11 @@ it('does not navigate after a publishing editor is unmounted', async () => {
   let finish!: (value: unknown) => void;
   const fetcher = mockApi(url => url === '/api/session' ? identity : url === '/api/recipes' ? new Promise(resolve => finish = resolve) : {});
   const navigate = vi.fn(); const view = render(Editor,{navigate}); await startNewRecipe();
+  await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Soup'}});
+  await waitFor(() => expect(listDrafts()[0]).toBeDefined());
   const [local] = listDrafts(); expect(local).toBeDefined();
-  await waitFor(() => expect(navigate).toHaveBeenCalledWith(`/new?draft=${local.id}`,{replace:true}));
   navigate.mockClear();
-  await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Soup'}}); await fireEvent.click(screen.getByRole('button',{name:'Publish recipe'}));
+  await fireEvent.click(screen.getByRole('button',{name:'Publish recipe'}));
   await waitFor(() => expect(finish).toBeTypeOf('function')); view.unmount(); finish(recipe); await new Promise(resolve => setTimeout(resolve,20)); expect(navigate).not.toHaveBeenCalled();
   expect(readDraft(local.id)?.draft.title).toBe('Soup');
   expect(listDrafts().map(draft => draft.id)).toEqual([local.id]);

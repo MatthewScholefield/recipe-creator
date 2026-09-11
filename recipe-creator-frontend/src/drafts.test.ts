@@ -28,6 +28,11 @@ describe('independent local drafts', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
     const a = createDraft('Safe'); expect(a.draft.mode).toBe('text'); expect(saveDraft(a)).toBe(false); expect(a.name).toBe('Safe');
   });
+  it('can create an in-memory draft without exposing it to draft lists', () => {
+    const value = createDraft('Not saved', false);
+    expect(readDraft(value.id)).toBeNull();
+    expect(listDrafts()).toEqual([]);
+  });
 });
 describe('edit draft retention', () => {
   const now = Date.parse('2026-09-11T12:00:00.000Z');
@@ -47,6 +52,11 @@ describe('edit draft retention', () => {
 
     store({...base, directions: base.directions + 'x'.repeat(SIGNIFICANT_DRAFT_CHANGE_SIZE)}, old);
     expect(readEditDraft('r1', {revision: 2, draft: base}, now)?.draft.directions).toHaveLength(base.directions.length + SIGNIFICANT_DRAFT_CHANGE_SIZE);
+  });
+  it('removes an edit draft that contains no changes from its base', () => {
+    store(base, new Date(now).toISOString());
+    expect(readEditDraft('r1', {revision: 2, draft: base}, now)).toBeNull();
+    expect(localStorage.getItem('notebook:draft:r1')).toBeNull();
   });
 
   it('retains old edits when their original revision is unavailable or deletion fails', () => {
