@@ -176,6 +176,22 @@ test('mobile quick tags stay on one row with visible search and no clipped keybo
   verify();
 });
 
+test('home and search result headings stay left-aligned on mobile', async ({page}) => {
+  await page.setViewportSize({width: 375, height: 812});
+  const verify = await mockApi(page);
+  await page.goto('/');
+  const heading = page.locator('.page-heading h1');
+  const container = page.locator('.page-heading');
+  await expect(heading).toHaveText(copy.home_title);
+  const leftEdges = async () => Promise.all([container, heading].map(async element => (await element.boundingBox())!.x));
+  expect(await leftEdges()).toEqual([16, 16]);
+  await page.getByRole('searchbox', {name: 'Search recipes', exact: true}).fill('soup');
+  await expect(page).toHaveURL('/?q=soup');
+  await expect(heading).toHaveText('Results');
+  expect(await leftEdges()).toEqual([16, 16]);
+  verify();
+});
+
 test('site copy failures keep neutral browse content and retry refreshes bound text', async ({page}) => {
   let attempts = 0;
   const verify = await mockApi(page, async (route, url) => {
