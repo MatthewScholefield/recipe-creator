@@ -1,4 +1,5 @@
-"""Lossless import of an explicitly supplied prototype JSON export; never contacts it."""
+"""Import a prototype JSON export and organize each newly created recipe."""
+import asyncio
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 import hashlib
@@ -6,7 +7,11 @@ import json
 from pathlib import Path
 from uuid import UUID, NAMESPACE_URL, uuid5
 
+from logly import logger
+
+from . import ai
 from .repository import ConflictError, Repository
+from .settings import Settings
 
 
 def _object(pairs):
@@ -87,6 +92,19 @@ def convert_recipe(record: dict) -> dict:
     }
 
 
+async def _organize_recipe(data: dict, settings: Settings) -> dict:
+    from .recipes import _groups_output
+
+    result = await ai.parse_recipe(data["source_text"], settings)
+    organized = deepcopy(data)
+    for key in ("description", "directions", "notes", "yield_amount", "yield_unit", "source_url"):
+        organized[key] = result[key]
+    organized["ingredient_groups"] = _groups_output(
+        result["ingredient_groups"], ai.source_hash(data["source_text"])
+    )
+    return organized
+
+
 @dataclass
 class ImportReport:
     total: int
@@ -106,8 +124,10 @@ class ImportReport:
         return {**asdict(self), "ok": self.ok}
 
 
-async def import_recipes(repo: Repository, records: list[dict], *, dry_run=False) -> ImportReport:
-    """Validate the entire snapshot before writes; insert recipe/history atomically.
+async def import_recipes(
+    repo: Repository, records: list[dict], settings: Settings, *, dry_run=False
+) -> ImportReport:
+    """Validate the snapshot, organize new recipes, then insert recipe/history atomically.
 
     Existing records are compared to immutable import history, not current edited
     content. Conflicts abort the entire import; repeat runs never overwrite edits.
@@ -130,30 +150,66 @@ async def import_recipes(repo: Repository, records: list[dict], *, dry_run=False
     if report.errors or report.conflicts:
         return report
 
+    async with repo.transaction() as tx:
+        for identifier, data in candidates.items():
+            current = await tx.get("recipes", identifier)
+            original = await tx.get("revisions", f"legacy-{identifier}")
+            if current is not None or original is not None:
+                if current is not None and original is not None and original.get("content", {}).get(
+                    "original_snapshot_hash"
+                ) == data["original_snapshot_hash"]:
+                    report.unchanged.append(identifier)
+                else:
+                    report.conflicts.append(identifier)
+            else:
+                report.would_create.append(identifier)
+    if not report.ok or dry_run:
+        return report
+
+    async def organize(identifier):
+        try:
+            return identifier, await _organize_recipe(candidates[identifier], settings), None
+        except Exception as exc:
+            logger.opt(exception=exc).error(f"Imported recipe organization failed: {identifier}")
+            return identifier, None, exc
+
+    organized = {}
+    for identifier, data, error in await asyncio.gather(
+        *(organize(identifier) for identifier in report.would_create)
+    ):
+        if error is not None:
+            report.errors.append(f"Recipe {identifier}: organization failed")
+        else:
+            organized[identifier] = data
+    if report.errors:
+        return report
+
     try:
         async with repo.transaction() as tx:
-            for identifier, data in candidates.items():
+            ready = []
+            for identifier in list(report.would_create):
                 current = await tx.get("recipes", identifier)
                 original = await tx.get("revisions", f"legacy-{identifier}")
-                if current is not None or original is not None:
-                    if current is not None and original is not None and original.get("content", {}).get(
-                        "original_snapshot_hash"
-                    ) == data["original_snapshot_hash"]:
-                        report.unchanged.append(identifier)
-                    else:
-                        report.conflicts.append(identifier)
+                if current is None and original is None:
+                    ready.append(identifier)
+                    continue
+                report.would_create.remove(identifier)
+                if current is not None and original is not None and original.get("content", {}).get(
+                    "original_snapshot_hash"
+                ) == candidates[identifier]["original_snapshot_hash"]:
+                    report.unchanged.append(identifier)
                 else:
-                    report.would_create.append(identifier)
-            if not report.ok or dry_run:
+                    report.conflicts.append(identifier)
+            if not report.ok:
                 return report
-            for identifier in report.would_create:
-                data = candidates[identifier]
+            for identifier in ready:
+                data = organized[identifier]
                 await tx.create("recipes", data, id=identifier)
                 await tx.create("revisions", {
                     "recipe_id": identifier, "actor_id": None, "revision": 1,
                     "reason": "legacy_import", "content": deepcopy(data),
                 }, id=f"legacy-{identifier}")
-            report.created = list(report.would_create)
+            report.created = ready
             report.would_create.clear()
     except ConflictError:
         report.created.clear()

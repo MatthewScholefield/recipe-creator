@@ -5,6 +5,7 @@ import os
 from uuid import uuid4
 
 import pytest
+from recipe_creator import ai
 
 from recipe_creator.legacy import convert_recipe, import_recipes, load_snapshot
 from recipe_creator.repository import Repository
@@ -18,6 +19,37 @@ def legacy():
             "notes": "=== unusual ---\n\tNotes.", "tags": ["Dinner", " dinner ", "Dinner", ""],
             "ingredientCategories": {"": ["  ½ cup milk  ", ""], "Empty": [], "--- Sauce ===": ["salt to taste"]},
             "unknown_metadata": {"keep": [None, 1, "verbatim"]}}
+
+
+@pytest.fixture
+def parse_calls(monkeypatch):
+    calls = []
+
+    async def organize(source, settings):
+        calls.append(source)
+        return {
+            "description": "Organized description",
+            "ingredient_groups": [{
+                "name": "Ingredients",
+                "ingredients": [{
+                    "original_text": "0.5 cup milk",
+                    "quantity": "0.5",
+                    "quantity_max": None,
+                    "unit": "cup",
+                    "name": "milk",
+                    "preparation": "",
+                    "optional": False,
+                }],
+            }],
+            "directions": "Organized directions",
+            "notes": "Organized notes",
+            "yield_amount": "4",
+            "yield_unit": "servings",
+            "source_url": "https://example.com/recipe",
+        }
+
+    monkeypatch.setattr("recipe_creator.ai.parse_recipe", organize)
+    return calls
 
 
 class MemoryRepository:
@@ -76,46 +108,79 @@ def test_invalid_json_rejected(tmp_path, content):
         load_snapshot(path)
 
 
-async def test_dry_run_duplicate_conflict_and_atomic_validation(legacy):
+async def test_dry_run_duplicate_conflict_and_atomic_validation(legacy, parse_calls):
     repo = MemoryRepository()
-    report = await import_recipes(repo, [legacy, legacy], dry_run=True)
+    report = await import_recipes(repo, [legacy, legacy], Settings(), dry_run=True)
     assert report.ok and report.would_create == [legacy["uuid"]]
     assert report.duplicates == [legacy["uuid"]]
     assert not repo.rows["recipes"]
     changed = {**legacy, "notes": "different"}
-    report = await import_recipes(repo, [legacy, changed])
+    report = await import_recipes(repo, [legacy, changed], Settings())
     assert not report.ok and report.conflicts == [legacy["uuid"]]
     assert not repo.rows["recipes"]
-    report = await import_recipes(repo, [legacy, {**legacy, "uuid": "bad"}])
+    report = await import_recipes(repo, [legacy, {**legacy, "uuid": "bad"}], Settings())
     assert not report.ok and report.errors
     assert not repo.rows["recipes"]
+    assert parse_calls == []
 
 
-async def test_idempotent_after_edits_and_conflicting_existing_record(legacy):
+async def test_organizes_new_recipe_once_and_preserves_edits(legacy, parse_calls):
     repo = MemoryRepository()
-    first = await import_recipes(repo, [legacy])
+    first = await import_recipes(repo, [legacy], Settings())
     assert first.created == [legacy["uuid"]]
+    assert parse_calls == [convert_recipe(legacy)["source_text"]]
+    imported = repo.rows["recipes"][legacy["uuid"]]
+    ingredient = imported["ingredient_groups"][0]["ingredients"][0]
+    assert ingredient["original_text"] == "0.5 cup milk"
+    assert ingredient["quantity"] == "0.5"
+    assert ingredient["unit"] == "cup"
+    assert ingredient["name"] == "milk"
+    assert imported["original_snapshot"] == legacy
     saved = deepcopy(repo.rows["revisions"])
     repo.rows["recipes"][legacy["uuid"]]["title"] = "Explicit later edit"
-    second = await import_recipes(repo, [legacy])
+    second = await import_recipes(repo, [legacy], Settings())
     assert second.unchanged == [legacy["uuid"]] and not second.created
+    assert len(parse_calls) == 1
     assert repo.rows["recipes"][legacy["uuid"]]["title"] == "Explicit later edit"
     assert repo.rows["revisions"] == saved
-    conflict = await import_recipes(repo, [{**legacy, "tags": ["changed"]}])
+    conflict = await import_recipes(repo, [{**legacy, "tags": ["changed"]}], Settings())
     assert conflict.conflicts == [legacy["uuid"]]
+    assert len(parse_calls) == 1
     assert repo.rows["revisions"] == saved
     repo.rows["revisions"].clear()
-    assert not (await import_recipes(repo, [legacy])).ok
+    assert not (await import_recipes(repo, [legacy], Settings())).ok
 
 
-async def test_category_order_change_is_conflict(legacy):
+async def test_organization_failure_keeps_the_whole_import_unwritten(legacy, parse_calls, monkeypatch):
+    successful = ai.parse_recipe
+    attempted = 0
+
+    async def fail_second(source, settings):
+        nonlocal attempted
+        attempted += 1
+        if attempted == 2:
+            raise RuntimeError("provider failed")
+        return await successful(source, settings)
+
+    monkeypatch.setattr(ai, "parse_recipe", fail_second)
+    second = {**legacy, "uuid": "aa742473-9947-4203-91d2-7495f5bd3b37", "title": "Second"}
     repo = MemoryRepository()
-    await import_recipes(repo, [legacy])
+    report = await import_recipes(repo, [legacy, second], Settings())
+    assert not report.ok
+    assert report.errors == [f"Recipe {second['uuid']}: organization failed"]
+    assert attempted == 2
+    assert not repo.rows["recipes"]
+    assert not repo.rows["revisions"]
+
+
+async def test_category_order_change_is_conflict(legacy, parse_calls):
+    repo = MemoryRepository()
+    await import_recipes(repo, [legacy], Settings())
     changed = {**legacy, "ingredientCategories": dict(reversed(list(legacy["ingredientCategories"].items())))}
-    assert (await import_recipes(repo, [changed])).conflicts == [legacy["uuid"]]
+    assert (await import_recipes(repo, [changed], Settings())).conflicts == [legacy["uuid"]]
 
 
-async def test_history_failure_rolls_back_recipe(legacy):
+async def test_history_failure_rolls_back_recipe(legacy, parse_calls):
     repo = MemoryRepository()
     create = repo.create
 
@@ -126,12 +191,12 @@ async def test_history_failure_rolls_back_recipe(legacy):
 
     repo.create = fail_history
     with pytest.raises(RuntimeError):
-        await import_recipes(repo, [legacy])
+        await import_recipes(repo, [legacy], Settings())
     assert not repo.rows["recipes"]
 
 
 @pytest.mark.integration
-async def test_real_lossless_idempotent_import(legacy):
+async def test_real_organized_idempotent_import(legacy, parse_calls):
     url = os.getenv("RECIPE_TEST_DB_URL")
     if not url:
         pytest.skip("Set RECIPE_TEST_DB_URL for real SurrealDB import")
@@ -141,17 +206,18 @@ async def test_real_lossless_idempotent_import(legacy):
     async with Repository(settings) as repo:
         await repo.migrate()
         try:
-            assert (await import_recipes(repo, [legacy], dry_run=True)).would_create == [legacy["uuid"]]
+            assert (await import_recipes(repo, [legacy], settings, dry_run=True)).would_create == [legacy["uuid"]]
             assert not await repo.list("recipes")
-            assert (await import_recipes(repo, [legacy])).created == [legacy["uuid"]]
+            assert (await import_recipes(repo, [legacy], settings)).created == [legacy["uuid"]]
             found = await repo.get("recipes", legacy["uuid"])
             assert found["id"] == legacy["uuid"]
-            for key in ("description", "directions", "notes", "tags"):
-                assert found[key] == legacy[key]
+            assert found["description"] == "Organized description"
+            assert found["directions"] == "Organized directions"
+            assert found["notes"] == "Organized notes"
             assert found["original_snapshot"] == legacy
-            assert [group["name"] for group in found["ingredient_groups"]] == list(legacy["ingredientCategories"])
+            assert [group["name"] for group in found["ingredient_groups"]] == ["Ingredients"]
             await repo.update("recipes", legacy["uuid"], {"title": "Edited", "revision": 2})
-            assert (await import_recipes(repo, [legacy])).unchanged == [legacy["uuid"]]
+            assert (await import_recipes(repo, [legacy], settings)).unchanged == [legacy["uuid"]]
             assert (await repo.get("recipes", legacy["uuid"]))["title"] == "Edited"
             with pytest.raises(ValueError, match="immutable"):
                 await repo.update("revisions", "legacy-" + legacy["uuid"], {"content": {}})

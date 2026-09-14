@@ -40,7 +40,7 @@ just admin-grant --user-id <user-id> --yes
 
 `admin-users` lists active, unmerged profiles without credentials. Omit `--user-id` from `admin-grant` to select a profile interactively; noninteractive use requires both `--user-id` and `--yes`. To revoke permission, run `just admin-revoke --user-id <user-id>` and confirm the requested user ID. Keep `.env` private and never commit it.
 
-`just help` lists build, import, backup, and restore commands. Maintenance recipes accept CLI arguments directly, for example `just import snapshot.json --dry-run`. Production uses static frontend assets, FastAPI, and SurrealDB; configure HTTPS, secure cookies, allowed origins, and persistent storage in `.env` before deployment. Keep `.env` private and never commit it.
+`just help` lists build, import, backup, and restore commands. Maintenance recipes accept CLI arguments directly, for example `just import snapshot.json --dry-run`. A real import uses the configured AI provider to organize every new recipe before any recipe is written; a failed organization leaves the whole import unwritten. Production uses static frontend assets, FastAPI, and SurrealDB; configure HTTPS, secure cookies, allowed origins, and persistent storage in `.env` before deployment. Keep `.env` private and never commit it.
 
 ## Production deployment
 

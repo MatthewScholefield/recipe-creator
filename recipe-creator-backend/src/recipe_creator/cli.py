@@ -329,7 +329,9 @@ async def _database_command(args, settings):
         if args.command == "migrate":
             return {"migrations": await repo.migrate()}
         if args.command == "import":
-            report = await import_recipes(repo, load_snapshot(args.snapshot), dry_run=args.dry_run)
+            report = await import_recipes(
+                repo, load_snapshot(args.snapshot), settings, dry_run=args.dry_run
+            )
             return report.as_dict()
         if args.command == "cleanup":
             from .photos import PhotoService
