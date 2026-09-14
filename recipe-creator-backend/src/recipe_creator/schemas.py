@@ -272,6 +272,9 @@ class RecipeCatalogProjection(StrictDTO):
     id: Identifier
     title: str
     description: str
+    search_description: str = ""
+    search_directions: str = ""
+    ingredient_groups: list[dict] = Field(default_factory=list)
     tags: list[str]
     owner_id: str | None
     author_name: str | None
@@ -281,14 +284,15 @@ class RecipeCatalogProjection(StrictDTO):
     def bare_record_id(cls, value):
         return str(value).partition(":")[2] or str(value) if value is not None else None
 
-
-class RecipeIdProjection(StrictDTO):
-    id: Identifier
-
-    @field_validator("id", mode="before")
+    @field_validator("search_description", "search_directions", mode="before")
     @classmethod
-    def bare_record_id(cls, value):
-        return str(value).partition(":")[2] or str(value)
+    def missing_search_text(cls, value):
+        return value or ""
+
+    @field_validator("ingredient_groups", mode="before")
+    @classmethod
+    def missing_ingredient_groups(cls, value):
+        return value or []
 
 
 class RecipeSummary(BaseModel):
@@ -301,6 +305,7 @@ class RecipeSummary(BaseModel):
     author_name: str | None
     total_views: int = Field(default=0, ge=0)
     unique_viewers: int = Field(default=0, ge=0)
+    search_score: float | None = None
 
 
 class RecipeSummaryGroup(BaseModel):

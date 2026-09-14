@@ -1084,6 +1084,8 @@ export interface components {
              * @default 0
              */
             unique_viewers: number;
+            /** Search Score */
+            search_score?: number | null;
         };
         /** RecipeSummaryGroup */
         RecipeSummaryGroup: {

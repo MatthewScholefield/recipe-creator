@@ -4,7 +4,7 @@ import Browse from './Browse.svelte';
 import { appState, DEFAULT_SITE_COPY, setSiteCopy } from './app-state.svelte';
 import { createDraft, draftHref, saveDraft } from './drafts';
 
-const summary = (id: string, tags: string[] = [], total_views = 0) => ({id, title: `Recipe ${id}`, tags, description: '', thumbnail_photo_id: null, owner_id:null, author_name:null, total_views, unique_viewers:0});
+const summary = (id: string, tags: string[] = [], total_views = 0, search_score: number | null = null) => ({id, title: `Recipe ${id}`, tags, description: '', thumbnail_photo_id: null, owner_id:null, author_name:null, total_views, unique_viewers:0, search_score});
 type Lookup = {ids: string[]; q?: string; tags: string[]};
 function mockApi(handler: (url: URL, init?: RequestInit) => unknown | Promise<unknown>) {
   const fetcher = vi.fn(async (input: string, init?: RequestInit) => {
@@ -130,4 +130,46 @@ it('renders Popular only at home and keeps live pagination offsets despite dupli
   await component.rerender({query:'soup'});
   await screen.findByRole('link',{name:'Recipe search'});
   expect(screen.queryByRole('heading',{name:'Popular'})).not.toBeInTheDocument();
+});
+
+it('preserves globally ranked server order across ordinary pages', async () => {
+  mockApi(url => {
+    const offset = Number(url.searchParams.get('offset'));
+    return offset === 0
+      ? {items: [summary('z', [], 0, 4.9), summary('a', [], 0, 3.8)], has_more: true}
+      : {items: [summary('m', [], 0, 2.7)], has_more: false};
+  });
+  render(Browse, {query: 'soup'});
+  await screen.findByRole('link', {name: 'Recipe z'});
+  expect(screen.getAllByRole('link', {name: /^Recipe [zam]$/}).map(link => link.textContent?.trim())).toEqual(['Recipe z', 'Recipe a']);
+  await fireEvent.click(screen.getByRole('button', {name: 'Load more recipes'}));
+  await screen.findByRole('link', {name: 'Recipe m'});
+  expect(screen.getAllByRole('link', {name: /^Recipe [zam]$/}).map(link => link.textContent?.trim())).toEqual(['Recipe z', 'Recipe a', 'Recipe m']);
+});
+
+it('globally ranks saved batches after retry and uses lexical IDs for score ties', async () => {
+  localStorage.setItem('notebook:bookmarks', JSON.stringify(Array.from({length: 101}, (_, i) => `id-${i}`)));
+  let failedOnce = false;
+  mockApi((_url, init) => {
+    const body = JSON.parse(String(init?.body)) as Lookup;
+    if (body.ids.includes('id-100')) {
+      if (!failedOnce) { failedOnce = true; throw new Error('temporary'); }
+      return {items: [summary('z', [], 0, 4.9)], unavailable_ids: []};
+    }
+    return {items: [summary('b', [], 0, 3.5), summary('a', [], 0, 3.5)], unavailable_ids: []};
+  });
+  render(Browse, {query: 'soup', savedOnly: true});
+  await screen.findByRole('button', {name: 'Retry failed requests'});
+  expect(screen.getAllByRole('link', {name: /^Recipe [ab]$/}).map(link => link.textContent?.trim())).toEqual(['Recipe a', 'Recipe b']);
+  await fireEvent.click(screen.getByRole('button', {name: 'Retry failed requests'}));
+  await screen.findByRole('link', {name: 'Recipe z'});
+  expect(screen.getAllByRole('link', {name: /^Recipe [zab]$/}).map(link => link.textContent?.trim())).toEqual(['Recipe z', 'Recipe a', 'Recipe b']);
+});
+
+it('retains bookmark order for saved results without search scores', async () => {
+  localStorage.setItem('notebook:bookmarks', JSON.stringify(['z', 'a']));
+  mockApi(() => ({items: [summary('a'), summary('z')], unavailable_ids: []}));
+  render(Browse, {query: '', savedOnly: true});
+  await screen.findByRole('link', {name: 'Recipe z'});
+  expect(screen.getAllByRole('link', {name: /^Recipe [za]$/}).map(link => link.textContent?.trim())).toEqual(['Recipe z', 'Recipe a']);
 });

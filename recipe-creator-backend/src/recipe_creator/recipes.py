@@ -2,7 +2,6 @@ import asyncio
 from copy import deepcopy
 from hashlib import sha256
 import json
-import re
 from time import monotonic
 from uuid import uuid5, NAMESPACE_URL
 
@@ -18,7 +17,7 @@ from .models import EnrichmentJob, Photo, Recipe as RecipeModel, RecipeViewStats
 from .photos import PUBLIC_FIELDS
 from surreal_sdk.protocol.cbor import RecordId
 from .schemas import (ParseRequest, ParseResult, Recipe, RecipeCatalogProjection, RecipeDraft,
-                      RecipeIdProjection, RecipeUpdate, MEAL_CLASSIFIERS, tag_key, RecipeListResponse, TagCatalog,
+                      RecipeUpdate, MEAL_CLASSIFIERS, tag_key, RecipeListResponse, TagCatalog,
                       Tag, RecipeLookupRequest, RecipeLookupResponse, IngredientLinesRequest, IngredientLinesResult,
                       RecipeViewCounts)
 
@@ -29,7 +28,10 @@ router = APIRouter()
 CATEGORIES = MEAL_CLASSIFIERS
 AUTHORED = ("original_text", "quantity", "quantity_max", "unit", "name", "preparation", "optional")
 DERIVED = ("grams", "grams_range", "grams_estimate", "grams_provenance", "grams_input_hash", "grams_error", "grams_confirmed")
-SUMMARY_FIELDS = ("id", "title", "string::slice(description, 0, 300) AS description", "tags", "owner_id", "owner_id.display_name AS author_name")
+SUMMARY_FIELDS = ("id", "title", "string::slice(description, 0, 300) AS description",
+                  "description AS search_description", "payload.directions AS search_directions",
+                  "ingredient_groups", "tags", "owner_id", "owner_id.display_name AS author_name")
+SUMMARY_KEYS = ("id", "title", "description", "tags", "owner_id", "author_name", "total_views", "unique_viewers")
 
 
 def _id(value, table):
@@ -69,6 +71,82 @@ def search_terms(query, known_tags):
     if unknown:
         errors.append("Tags not found: " + ", ".join(unknown))
     return " ".join(words).lower(), tags, errors
+
+
+def _tokens(value):
+    import unicodedata
+
+    normalized = unicodedata.normalize("NFKD", str(value or "")).casefold()
+    words, current = [], []
+    for character in normalized:
+        if unicodedata.category(character) == "Mn":
+            continue
+        if character.isalnum():
+            current.append(character)
+        elif current:
+            words.append("".join(current))
+            current = []
+    if current:
+        words.append("".join(current))
+    return tuple(words)
+
+
+def _search_document(recipe):
+    ingredient_tokens = []
+    for group in recipe.get("ingredient_groups") or []:
+        for ingredient in group.get("ingredients") or []:
+            ingredient_tokens.extend(_tokens(ingredient.get("name", "")))
+    tag_tokens = [token for tag in recipe.get("tags") or [] for token in _tokens(tag)]
+    return {
+        "title": _tokens(recipe.get("title", "")),
+        "ingredients": tuple(ingredient_tokens),
+        "tags": tuple(tag_tokens),
+        "description": _tokens(recipe.get("search_description", recipe.get("description", ""))),
+        "directions": _tokens(recipe.get("search_directions", recipe.get("directions", ""))),
+    }
+
+
+def _search_score_tokens(document: dict, ordered: tuple[str, ...]) -> float | None:
+    if not ordered:
+        return None
+    distinct = tuple(dict.fromkeys(ordered))
+    final = ordered[-1]
+    prefix_allowed = len(final) >= 3
+    fields = (("title", 5), ("ingredients", 4), ("tags", 3), ("description", 2), ("directions", 1))
+    weights = []
+    for query_token in distinct:
+        strongest = 0.0
+        for field, weight in fields:
+            tokens = document.get(field, ())
+            if query_token in tokens:
+                strongest = max(strongest, float(weight))
+            elif prefix_allowed and query_token == final and any(token.startswith(query_token) for token in tokens):
+                strongest = max(strongest, weight / 2)
+        if not strongest:
+            return None
+        weights.append(strongest)
+
+    title = document.get("title", ())
+    if title == ordered:
+        tier = 4
+    elif any(title[index:index + len(ordered)] == ordered for index in range(len(title) - len(ordered) + 1)):
+        tier = 3
+    elif all(token in title for token in distinct):
+        tier = 2
+    else:
+        tier = 1
+    return tier + sum(weights) / (5 * len(distinct) + 1)
+
+
+def search_score(document: dict, text: str) -> float | None:
+    return _search_score_tokens(document, _tokens(text))
+
+
+def _public_summary(item, score=None):
+    summary = {key: item[key] for key in SUMMARY_KEYS}
+    if score is not None:
+        summary["search_score"] = score
+    return summary
 
 
 async def _project(repo, fields, row_model, condition=None):
@@ -123,6 +201,10 @@ async def _catalog(repo):
             return cached[1]
         rows = await _project(repo, SUMMARY_FIELDS, RecipeCatalogProjection)
         summaries = await attach_view_counts(repo, [row.model_dump() for row in rows])
+        for summary in summaries:
+            summary["_search"] = _search_document(summary)
+            for field in ("search_description", "search_directions", "ingredient_groups"):
+                summary.pop(field)
         order = {name: index for index, name in enumerate((*CATEGORIES, "Other"))}
         summaries.sort(key=lambda item: (
             order[_group(item)], -item["total_views"], item["title"].lower(), item["id"]
@@ -132,20 +214,22 @@ async def _catalog(repo):
         return summaries
 
 
-async def _text_matches(repo, text):
+async def _text_matches(repo, text, catalog):
     cache = getattr(repo, "_recipe_search", {})
-    cached = cache.get(text)
+    key = _tokens(text)
+    cached = cache.get(key)
     if cached and cached[0] > monotonic():
         return cached[1]
-    pattern = "(?i)" + re.escape(text)
-    condition = Q(title__regex=pattern) | Q(description__regex=pattern) | Q(**{"payload.directions__regex": pattern})
-    rows = await _project(repo, ("id",), RecipeIdProjection, condition)
-    ids = {row.id for row in rows}
+    scores = {}
+    for item in catalog:
+        score = _search_score_tokens(item["_search"], key)
+        if score is not None:
+            scores[item["id"]] = score
     if len(cache) >= 128:
         cache.pop(next(iter(cache)))
-    cache[text] = (monotonic() + 15, ids)
+    cache[key] = (monotonic() + 15, scores)
     repo._recipe_search = cache
-    return ids
+    return scores
 
 
 def _revalidate(request, response, result, *, private=False):
@@ -170,19 +254,25 @@ async def summary_thumbnails(request, items):
     return result
 
 
-async def filter_summaries(repo, catalog, q, selected_tags, owner_id=None, *, candidates=None, text_match_ids=None):
+async def filter_summaries(repo, catalog, q, selected_tags, owner_id=None, *, candidates=None, text_scores=None):
     known = {tag_key(tag) for item in catalog for tag in item["tags"]}
     text, legacy_tags, errors = search_terms(q, known)
     selected = {tag_key(tag) for tag in selected_tags}
     unknown = selected - known
     if unknown:
         errors.append("Tags not found: " + ", ".join(sorted(unknown)))
-    matches = (text_match_ids if text_match_ids is not None else await _text_matches(repo, text)) if text else None
-    filtered = [item for item in (catalog if candidates is None else candidates)
-                if not unknown and (matches is None or item["id"] in matches)
-                and selected <= {tag_key(tag) for tag in item["tags"]}
-                and (not legacy_tags or set(legacy_tags) & {tag_key(tag) for tag in item["tags"]})
-                and (owner_id is None or item["owner_id"] == _id(owner_id, "users"))]
+    has_text = bool(_tokens(text))
+    scores = (text_scores if text_scores is not None else await _text_matches(repo, text, catalog)) if has_text else None
+    filtered = []
+    for item in catalog if candidates is None else candidates:
+        tags = {tag_key(tag) for tag in item["tags"]}
+        if (unknown or (scores is not None and item["id"] not in scores)
+                or not selected <= tags or (legacy_tags and not set(legacy_tags) & tags)
+                or (owner_id is not None and item["owner_id"] != _id(owner_id, "users"))):
+            continue
+        filtered.append(_public_summary(item, scores[item["id"]] if scores is not None else None))
+    if scores is not None:
+        filtered.sort(key=lambda item: (-item["search_score"], item["id"]))
     return filtered, errors
 
 
@@ -193,22 +283,29 @@ async def lookup_recipes(body: RecipeLookupRequest, request: Request):
     if not ids:
         return {"items": [], "unavailable_ids": []}
     # Bounded candidate retrieval, not a collection scan or stale summary cache.
-    candidates, unavailable, text_matches = [], [], set()
+    candidates, unavailable, text_scores = [], [], {}
     text, _, _ = search_terms(body.q, set())
+    query_tokens = _tokens(text)
+    has_text = bool(query_tokens)
     for recipe_id in ids:
         row = await repo.get("recipes", recipe_id)
-        if not row or row.get("status") != "published" or row.get("deleted_at"):
+        if not _live(row):
             unavailable.append(recipe_id)
             continue
-        if text in " ".join(str(row.get(field, "")) for field in ("title", "description", "directions")).lower():
-            text_matches.add(recipe_id)
         owner = await repo.get("users", row["owner_id"]) if row.get("owner_id") else None
-        candidates.append({"id": recipe_id, "title": row.get("title", ""),
-                           "description": row.get("description", "")[:300], "tags": row.get("tags", []),
-                           "owner_id": row.get("owner_id"), "author_name": owner["display_name"] if owner else None})
+        candidate = {"id": recipe_id, "title": row.get("title", ""),
+                     "description": (row.get("description") or "")[:300], "tags": row.get("tags") or [],
+                     "owner_id": row.get("owner_id"), "author_name": owner["display_name"] if owner else None,
+                     "_search": _search_document(row)}
+        candidates.append(candidate)
+        if has_text:
+            score = _search_score_tokens(candidate["_search"], query_tokens)
+            if score is not None:
+                text_scores[recipe_id] = score
     await attach_view_counts(repo, candidates)
     catalog = await _catalog(repo) if body.q or body.tags else candidates
-    items, _ = await filter_summaries(repo, catalog, body.q, body.tags, candidates=candidates, text_match_ids=text_matches)
+    items, _ = await filter_summaries(repo, catalog, body.q, body.tags, candidates=candidates,
+                                      text_scores=text_scores if has_text else None)
     return {"items": await summary_thumbnails(request, items), "unavailable_ids": unavailable}
 
 

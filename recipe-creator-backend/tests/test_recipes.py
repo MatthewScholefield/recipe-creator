@@ -59,6 +59,25 @@ def test_search_prototype_semantics():
     assert recipes.search_terms(" Red  soup tag:dinner -tag:lunch -incomplete", {"dinner", "lunch"}) == ("red soup", ["dinner", "lunch"], [])
     assert recipes.search_terms("foo:x tag:missing tag:", set()) == ("", [], ["Unknown search fields: foo", "Tags not found: missing"])
 
+
+def test_search_score_normalizes_tokens_and_ranks_field_strength():
+    rows = [
+        {"title": "Chicken Soup"},
+        {"title": "Quick Chicken Soup"},
+        {"title": "Soup with Chicken"},
+        {"title": "Pantry Bowl", "ingredient_groups": [{"ingredients": [{"name": "chicken soup"}]}]},
+        {"title": "Described", "description": "chicken soup"},
+        {"title": "Directed", "directions": "chicken soup chicken soup chicken soup"},
+    ]
+    scores = [recipes.search_score(recipes._search_document(row), "chicken soup") for row in rows]
+    assert all(score is not None for score in scores)
+    assert scores == sorted(scores, reverse=True)
+    accented = recipes._search_document({"title": "Crème brûlée"})
+    assert recipes.search_score(accented, "CREME-brulee") is not None
+    assert recipes.search_score(recipes._search_document({"title": "Chicken"}), "chick") is not None
+    assert recipes.search_score(recipes._search_document({"title": "Graham Cracker"}), "ham") is None
+    assert recipes.search_score(recipes._search_document({"title": "Chicken"}), "lemon chicken") is None
+
 def test_groups_output_repairs_duplicate_ids():
     groups = [
         {"id": "same-group", "name": "", "ingredients": [
@@ -154,37 +173,72 @@ async def test_crud_idempotency_original_snapshot_and_history(app):
         assert (await browser.post("/recipes", json=draft(), headers={"Idempotency-Key": "stable"})).json() == original
 
 
-async def test_search_projection_pagination_and_cache(app, monkeypatch):
+async def test_search_projection_pagination_and_cache(app):
     repo = app.state.repo
     async with client(app) as browser:
-        await identify(app, browser)
-        for value in [draft(title="Zebra", tags=["breakfast"], description="red soup"),
-                      draft(title="Apple", tags=["dinner"], directions="RED SOUP here"),
-                      draft(title="Berry", tags=["lunch"], directions="red then soup"),
-                      draft(title="Aardvark", tags=["other"], source_text="red soup")]:
-            assert (await browser.post("/recipes", json=value)).status_code == 201
-        calls = []
-        project = recipes._project
-        async def spy(repository, fields, row_model, condition=None):
-            calls.append((fields, row_model))
-            return await project(repository, fields, row_model, condition)
-        monkeypatch.setattr(recipes, "_project", spy)
-        response = await browser.get("/recipes?limit=2")
-        assert response.status_code == 200, response.text
-        result = response.json()
-        assert [item["title"] for item in result["items"]] == ["Zebra", "Berry"]
-        assert result["has_more"] and result["total"] == 4
-        assert "source_text" not in result["items"][0]
-        assert result["items"][0]["author_name"] == "Alice"
-        assert (await browser.get("/recipes?offset=2&limit=2")).json()["items"][0]["title"] == "Apple"
-        assert len(calls) == 1
-        result = (await browser.get("/recipes", params={"q": "red soup tag:lunch -tag:dinner"})).json()
-        assert [item["title"] for item in result["items"]] == ["Apple"]
-        assert calls[-1][0] == ("id",)
-        result = (await browser.get("/recipes", params={"q": "tag:absent owner:x"})).json()
-        assert len(result["errors"]) == 2
+        owner = await identify(app, browser)
+        fixtures = [
+            ("exact", "Chicken Soup", ["dinner", "vegetarian"], "", "", []),
+            ("quick", "Quick Chicken Soup", ["lunch"], "", "", []),
+            ("reversed", "Soup with Chicken", ["dinner"], "", "", []),
+            ("ingredient", "Pantry Bowl", ["dessert"], "", "", [{"ingredients": [{"name": "chicken soup"}]}]),
+            ("description", "Described Dish", ["breakfast"], "chicken soup", "", []),
+            ("directions", "Directed Dish", ["other"], "", "chicken soup chicken soup chicken soup", []),
+            ("mixed", "Chicken Supper", ["dinner"], "", "", [{"ingredients": [{"name": "lemon"}]}]),
+            ("plain", "Plain Chicken", ["dinner"], "", "", []),
+            ("accented", "Crème brûlée", ["dessert"], "", "", []),
+            ("graham", "Graham Cracker", ["dessert"], "", "", []),
+            ("source", "Source Artifact", ["dinner"], "", "", []),
+        ]
+        for recipe_id, title, tags, description, directions, groups in fixtures:
+            await repo.create("recipes", {"title": title, "status": "published", "owner_id": owner["id"],
+                                         "tags": tags, "description": description, "directions": directions,
+                                         "ingredient_groups": groups,
+                                         "source_text": "chicken soup" if recipe_id == "source" else ""}, recipe_id)
+
+        browse = (await browser.get("/recipes?limit=2")).json()
+        assert browse["has_more"] and browse["total"] == len(fixtures)
+        assert all(item["search_score"] is None for item in browse["items"])
+        assert browse["items"][0]["author_name"] == "Alice"
+        assert "source_text" not in browse["items"][0]
+
+        result = (await browser.get("/recipes", params={"q": "chicken soup"})).json()
+        expected = ["exact", "quick", "reversed", "ingredient", "description", "directions"]
+        assert [item["id"] for item in result["items"]] == expected
+        assert all(item["search_score"] is not None for item in result["items"])
+        assert all("search_description" not in item and "search_directions" not in item
+                   and "ingredient_groups" not in item for item in result["items"])
+
+        paged = []
+        offset = 0
+        while True:
+            page = (await browser.get("/recipes", params={"q": "chicken soup", "offset": offset, "limit": 2})).json()
+            paged.extend(item["id"] for item in page["items"])
+            if not page["has_more"]:
+                break
+            offset += len(page["items"])
+        assert paged == expected and len(paged) == len(set(paged))
+
+        assert [item["id"] for item in (await browser.get("/recipes", params={"q": "lemon chicken"})).json()["items"]] == ["mixed"]
+        assert [item["id"] for item in (await browser.get("/recipes", params={"q": "CREME-brulee"})).json()["items"]] == ["accented"]
+        assert "exact" in [item["id"] for item in (await browser.get("/recipes", params={"q": "chick"})).json()["items"]]
+        assert not (await browser.get("/recipes", params={"q": "ham"})).json()["items"]
+
+        tagged = (await browser.get("/recipes", params=[("q", "chicken soup"), ("tag", "dinner"), ("tag", "vegetarian")])).json()
+        assert [item["id"] for item in tagged["items"]] == ["exact"]
+        legacy = (await browser.get("/recipes", params={"q": "chicken soup tag:lunch -tag:dinner"})).json()
+        assert [item["id"] for item in legacy["items"]] == ["exact", "quick", "reversed"]
+
+        saved = (await browser.post("/recipes/lookup", json={"ids": list(reversed(expected)), "q": "chicken soup"})).json()
+        assert [item["id"] for item in saved["items"]] == expected
+        assert not saved["unavailable_ids"]
+
+        invalid = (await browser.get("/recipes", params={"q": "tag:absent owner:x"})).json()
+        assert len(invalid["errors"]) == 2
         assert (await browser.get("/recipes", params={"q": "$x); DELETE recipes;"})).status_code == 200
-        assert (await browser.get("/tags")).json()["tags"] == ["breakfast", "dinner", "lunch", "other"]
+        assert set((await browser.get("/tags")).json()["tags"]) == {
+            "breakfast", "dinner", "vegetarian", "lunch", "dessert", "other",
+        }
         assert (await browser.get("/recipes?limit=101")).status_code == 422
 
 
@@ -343,7 +397,8 @@ async def test_selected_tags_lookup_privacy_and_complete_retrieval(app):
             assert result.status_code == 200, result.text
             found.extend(row['id'] for row in result.json()['items'])
             assert not result.json()['unavailable_ids']
-        assert found == public_ids
+        assert found == [recipe_id for start in range(0, len(public_ids), 100)
+                         for recipe_id in sorted(public_ids[start:start + 100])]
         pending = await repo.create('photos', {'recipe_id': public_ids[0], 'uploader_id': owner['id'], 'status': 'pending'})
         result = (await browser.post('/recipes/lookup', json={'ids': [public_ids[0]]})).json()
         assert result['items'][0]['thumbnail_photo_id'] is None

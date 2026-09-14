@@ -24,7 +24,8 @@
   let failedBatches = $state<number[]>([]), generation = 0, nextOffset = 0, controller: AbortController | undefined;
   const selected = $derived(uniqueTags(selectedTags));
   const active = $derived(Boolean(query || selected.length));
-  const visible = $derived(items);
+  const scored = $derived(items.some(item => item.search_score != null));
+  const visible = $derived(savedOnly || scored ? items : [...items].sort((a, b) => a.title.localeCompare(b.title)));
   function rank(left: RecipeSummary, right: RecipeSummary) {
     const leftTitle = left.title.toLocaleLowerCase('en'), rightTitle = right.title.toLocaleLowerCase('en');
     return right.total_views - left.total_views || (leftTitle < rightTitle ? -1 : leftTitle > rightTitle ? 1 : 0)
@@ -119,7 +120,10 @@
     await Promise.all(Array.from({length: Math.min(2, indexes.length)}, worker));
     if (token !== generation) return;
     const order = new Map(values.ids.map((id, index) => [id, index]));
-    items = nextItems.sort((left, right) => (order.get(left.id) ?? Infinity) - (order.get(right.id) ?? Infinity));
+    const ranked = nextItems.some(item => item.search_score != null);
+    items = nextItems.sort((left, right) => ranked
+      ? (right.search_score ?? -Infinity) - (left.search_score ?? -Infinity) || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+      : (order.get(left.id) ?? Infinity) - (order.get(right.id) ?? Infinity));
     unavailable = [...new Set(nextUnavailable)]; failedBatches = failures;
     busy = false;
   }
