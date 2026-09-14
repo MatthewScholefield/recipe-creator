@@ -15,6 +15,7 @@
   import Icon from './ui/Icon.svelte';
   import PhotoDate from './PhotoDate.svelte';
   import Button from './ui/Button.svelte';
+  import Modal from './ui/Modal.svelte';
   import BackLink from './ui/BackLink.svelte';
   import RecipeConflict from './RecipeConflict.svelte';
   import RecipeDiffPanel from './RecipeDiffPanel.svelte';
@@ -34,7 +35,8 @@
   let needsReview = $state(false);
   let review = $state<null | {status: 'loading' | 'ready' | 'error'; candidate: RecipeDraft; latest?: Recipe; error: string}>(null);
   let reviewEpoch = $state(0), completedRecipeId = $state(''), completionError = $state('');
-  let activeId = $state(''), draftName = $state(''), naming = $state(false), textChoice = $state(false), discard = $state(false), discardChanges = $state(false);
+  let activeId = $state(''), draftName = $state(''), naming = $state(false), discard = $state(false), discardChanges = $state(false);
+  let sectionToDelete = $state<{id: string; label: string} | null>(null);
   let drafts = $state<DraftSummary[]>([]), legacyAvailable = $state(false), recovered = $state<LegacyDraft | null>(null);
   let tags = $state<string[]>([...MEAL_CLASSIFIERS]), tagsError = $state('');
   let publishKey: string = crypto.randomUUID(), baseline = '', baselineName = '', lastSaved: string | null = null, alive = true, writing = false;
@@ -185,11 +187,22 @@
   function bindInput(node: HTMLInputElement, rowId: string) { inputs.set(rowId, node); return {destroy() { inputs.delete(rowId); }}; }
   function undoOrganization() {
     if (!undo) return;
-    cancelWork(); draft = copy(undo); dirty = copy(undoLines); undo = undefined; undoLines = {}; textChoice = false;
+    cancelWork(); draft = copy(undo); dirty = copy(undoLines); undo = undefined; undoLines = {};
   }
-  function editText(formatted: boolean) {
+  function editText() {
     cancelWork(); undo = copy(draft); undoLines = copy(dirty);
-    draft = {...draft, mode: 'text', source_text: formatted ? formatRecipe(draft) : draft.source_text}; textChoice = false;
+    draft = {...draft, mode: 'text', source_text: formatRecipe(draft)};
+  }
+  function confirmSectionDelete() {
+    if (!sectionToDelete) return;
+    const group = draft.ingredient_groups.find(({id}) => id === sectionToDelete?.id);
+    sectionToDelete = null;
+    if (!group) return;
+    changed();
+    const next = {...dirty};
+    for (const row of group.ingredients) delete next[row.id];
+    dirty = next;
+    draft.ingredient_groups = draft.ingredient_groups.filter(({id}) => id !== group.id);
   }
   async function previewLines(version: number, signal: AbortSignal): Promise<void> {
     const snapshot = copy(draft), serialized = JSON.stringify(snapshot), lines = dirtyIngredientLines(snapshot, dirty);
@@ -437,15 +450,14 @@
           <label>Paste or write your recipe<textarea class="source-editor" rows="20" maxlength="100000" bind:value={draft.source_text} placeholder="Ingredients, directions, and anything else you want to share"></textarea></label>
           <div class="toolbar"><button type="button" disabled={parsing || !draft.source_text.trim()} onclick={organize}>Organize</button><span class="help">Optional: organize ingredients without rewriting your words.</span></div>
         {:else}
-          <div class="toolbar"><button type="button" class="ghost" onclick={() => textChoice = !textChoice}><Icon name="edit" size={16} />Edit as text</button></div>
-          {#if textChoice}<section class="notice"><p>Choose the text to edit. The current version is kept for undo.</p><button type="button" onclick={() => editText(false)}>Use original text</button><button type="button" onclick={() => editText(true)}>Use formatted current recipe</button></section>{/if}
+          <div class="toolbar"><button type="button" class="ghost" onclick={editText}><Icon name="edit" size={16} />Edit as text</button></div>
           <label>Description<textarea rows="3" bind:value={draft.description}></textarea></label>
           <h2>Ingredients</h2>
           {#each draft.ingredient_groups as group, gi (group.id)}
             <section class="editor-group"><div class="toolbar"><label>Section name (optional)<input bind:value={group.name}></label>
               <button type="button" class="ghost" aria-label={`Move section ${gi + 1} up`} disabled={gi === 0} onclick={() => {changed(); draft.ingredient_groups = move(draft.ingredient_groups, gi, -1);}}>↑</button>
               <button type="button" class="ghost" aria-label={`Move section ${gi + 1} down`} disabled={gi === draft.ingredient_groups.length - 1} onclick={() => {changed(); draft.ingredient_groups = move(draft.ingredient_groups, gi, 1);}}>↓</button>
-              <button type="button" class="ghost" aria-label={`Remove section ${gi + 1}`} onclick={() => {changed(); draft.ingredient_groups = draft.ingredient_groups.filter((_, index) => index !== gi);}}><Icon name="trash" size={16} /></button>
+              <button type="button" class="ghost" aria-label={`Remove section ${gi + 1}`} onclick={() => sectionToDelete = {id: group.id, label: group.name.trim() || `Section ${gi + 1}`}}><Icon name="trash" size={16} /></button>
             </div>
             {#each group.ingredients as row, ri (row.id)}
               <div class="line-row"><label><span class="sr-only">Ingredient {gi + 1}.{ri + 1}</span><input use:bindInput={row.id} value={ingredientLine(row)} maxlength="10000" placeholder="2 tbsp milk" oninput={(event) => setLine(group, ri, event.currentTarget.value)} onkeydown={(event) => rowKeys(event, group, ri)}></label>
@@ -468,7 +480,6 @@
           <div class="row-fields"><label>Yield amount<input bind:value={draft.yield_amount} placeholder="4"></label><label>Yield unit<input bind:value={draft.yield_unit} placeholder="servings"></label></div>
           <label>Source link<input type="url" bind:value={draft.source_url} placeholder="https://…"></label><label>Modifications<textarea rows="3" bind:value={draft.modifications}></textarea></label>
         </details>
-        {#if draft.mode === 'structured'}<details><summary>Preview and original text</summary><pre class="prose">{formatRecipe(draft)}</pre><h3>Original text</h3><pre class="prose">{draft.source_text}</pre></details>{/if}
       </fieldset>
       {#if recipeId && editorRecipe}
         <AuthorPicker recipe={editorRecipe} onchanged={(result) => {editorRecipe = {...editorRecipe!, ...result}; revision = result.revision; notice = `Author changed to ${result.author_name || 'Unknown author'}.`;}} />
@@ -493,12 +504,19 @@
         {#if recipeId && !recovered}<Button variant="danger" disabled={busy} onclick={() => discardChanges = true}><Icon name="trash" size={16} />Discard changes</Button>{/if}
       </div>
     </form>
+    <Modal open={!!sectionToDelete} title={`Delete ${sectionToDelete?.label || 'section'}?`} onclose={() => sectionToDelete = null}>
+      <p>This will remove {sectionToDelete?.label || 'this section'} and all of its ingredients.</p>
+      <div class="toolbar dialog-actions"><Button variant="ghost" onclick={() => sectionToDelete = null}>Cancel</Button><Button variant="danger" onclick={confirmSectionDelete}>Delete section</Button></div>
+    </Modal>
     {/if}
   {/if}
 {/if}
 {/if}
 <style>
-  .line-row{display:flex;align-items:center;gap:.25rem;margin:.4rem 0}.line-row label{flex:1;margin:0;min-width:0}.line-row input{width:100%}.ghost{display:inline-flex;align-items:center;gap:.3rem;background:transparent;border-color:transparent;padding:.35rem .5rem;font-size:.9rem}.toolbar{flex-wrap:wrap}.draft-actions{margin-bottom:1rem}.draft-badge{font-size:.85rem;color:var(--muted)}.draft-recovery{border-style:dashed;max-width:32rem}.draft-recovery h2{margin-top:0}.draft-recovery-description{margin:.25rem 0;color:var(--muted);font-weight:600}.draft-list{list-style:none;padding:0}.draft-list li{display:flex;justify-content:space-between;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--border)}.draft-list small{display:block}.submit-wrapper{display:inline-flex}.submit-wrapper:focus-visible{outline:2px solid currentColor;outline-offset:4px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  .line-row{display:flex;align-items:center;gap:.25rem;margin:.4rem 0}.line-row label{flex:1;margin:0;min-width:0}.line-row input{width:100%}.ghost{display:inline-flex;align-items:center;gap:.3rem;background:transparent;border-color:transparent;padding:.35rem .5rem;font-size:.9rem}.ghost:hover:not(:disabled){background:var(--ui-surface-muted);border-color:var(--ui-control-border);color:var(--ui-accent-strong)}.ghost:focus-visible,form button:focus-visible{outline:3px solid var(--ui-accent);outline-offset:3px}.toolbar{flex-wrap:wrap}.dialog-actions{justify-content:flex-end;margin-bottom:0}.draft-actions{margin-bottom:1rem}.draft-badge{font-size:.85rem;color:var(--muted)}.draft-recovery{border-style:dashed;max-width:32rem}.draft-recovery h2{margin-top:0}.draft-recovery-description{margin:.25rem 0;color:var(--muted);font-weight:600}.draft-list{list-style:none;padding:0}.draft-list li{display:flex;justify-content:space-between;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--border)}.draft-list small{display:block}.submit-wrapper{display:inline-flex}.submit-wrapper:focus-visible{outline:2px solid currentColor;outline-offset:4px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
   .draft-diff{margin:1rem 0;padding-top:.75rem;border-top:1px solid var(--line)}.draft-diff h3,.draft-diff h4{margin:.25rem 0}.draft-diff h4{font-size:.95rem}.draft-diff-fields{display:grid;gap:.75rem}.save-actions{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
   form input:not([type=checkbox]),form textarea{font-weight:400}
+  form button:not(.ghost):not(.primary){background:var(--ui-surface);border-color:var(--ui-control-border);color:var(--ui-accent-strong);transition:background-color .15s ease,border-color .15s ease,color .15s ease,box-shadow .15s ease}
+  form button:not(.ghost):not(.primary):hover:not(:disabled){background:var(--ui-surface-muted);border-color:var(--ui-accent)}
+  form button.primary:hover:not(:disabled){background:var(--ui-accent-strong);border-color:var(--ui-accent-strong)}
 </style>

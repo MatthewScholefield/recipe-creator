@@ -140,7 +140,23 @@ export function ingredientText(row: Ingredient, scale = 1, grams = false): strin
   return [ingredientAmount(row, scale), row.name].filter(Boolean).join(' ') + (row.preparation ? `, ${row.preparation}` : '') + (row.optional ? ' (optional)' : '');
 }
 export function formatRecipe(draft: RecipeDraft): string {
-  return [draft.description, draft.ingredient_groups.length ? 'Ingredients\n' + draft.ingredient_groups.map(group => [group.name && draft.ingredient_groups.length > 1 ? `=== ${group.name} ===` : '', ...group.ingredients.map(row => ingredientText(row))].filter(Boolean).join('\n')).join('\n\n') : '', draft.directions ? `Directions\n${draft.directions}` : '', draft.notes ? `Notes\n${draft.notes}` : ''].filter(Boolean).join('\n\n');
+  const sections: string[] = [];
+  const prose = (title: string, value: string) => {
+    const text = value.trim();
+    if (text) sections.push(`## ${title}\n\n${text}`);
+  };
+  prose('Description', draft.description);
+  if (draft.ingredient_groups.length) {
+    const groups = draft.ingredient_groups.map(group => {
+      const name = group.name.trim().replace(/\s+/g, ' ');
+      const lines = group.ingredients.map(row => ingredientText(row).trim()).filter(Boolean).map(line => `- ${line}`);
+      return [name && draft.ingredient_groups.length > 1 ? `### ${name}` : '', ...lines].filter(Boolean).join('\n');
+    }).filter(Boolean);
+    if (groups.length) sections.push(`## Ingredients\n\n${groups.join('\n\n')}`);
+  }
+  prose('Directions', draft.directions);
+  prose('Notes', draft.notes);
+  return sections.join('\n\n');
 }
 export function applyParse(draft: RecipeDraft, result: ParseResult): RecipeDraft {
   return {

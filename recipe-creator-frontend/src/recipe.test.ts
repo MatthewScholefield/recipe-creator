@@ -19,13 +19,13 @@ describe('lossless recipe representations', () => {
     const draft = {...blank('structured'), description: '  A family favorite.\n', directions: 'Heat to 180°C.\n\n  Wait 20 minutes.\n', notes: '  Never change this.\n'};
     draft.ingredient_groups = ['', 'Sauce', 'Sauce'].map((name, i) => ({id: String(i), name, ingredients: [{...ingredient(), original_text: 'salt, to taste'}]}));
     const text = formatRecipe(draft);
-    expect(text).toContain(draft.description); expect(text).toContain(draft.directions); expect(text).toContain(draft.notes);
-    expect(text.match(/=== Sauce ===/g)).toHaveLength(2); expect(text.match(/salt, to taste/g)).toHaveLength(3);
+    expect(text).toContain(draft.description.trim()); expect(text).toContain(draft.directions.trim()); expect(text).toContain(draft.notes.trim());
+    expect(text.match(/### Sauce/g)).toHaveLength(2); expect(text.match(/- salt, to taste/g)).toHaveLength(3);
   });
   it('keeps a lone section label in data but omits it from formatted display text', () => {
     const draft = {...blank('structured'), ingredient_groups: [{id: 'only', name: 'Ingredients', ingredients: [{...ingredient(), original_text: '2 eggs'}]}]};
     expect(draft.ingredient_groups[0].name).toBe('Ingredients');
-    expect(formatRecipe(draft)).toBe('Ingredients\n2 eggs');
+    expect(formatRecipe(draft)).toBe('## Ingredients\n\n- 2 eggs');
   });
   it('retains the original source and applies every organized recipe field', () => {
     const draft = {...blank(), source_text: 'Original source\n  ', description: 'old', yield_amount: '2', source_url: 'https://old.example'};
@@ -74,7 +74,7 @@ describe('safe ingredient quantities', () => {
         name:'flour',
       }],
     }];
-    expect(formatRecipe(draft)).toBe('Ingredients\n½ cup flour');
+    expect(formatRecipe(draft)).toBe('## Ingredients\n\n- ½ cup flour');
   });
   it('scales fractions and ranges only in ingredients', () => {
     const row = {...ingredient(), quantity:'1/2', quantity_max:'1', unit:'cup', name:'flour'};

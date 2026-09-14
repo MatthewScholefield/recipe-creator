@@ -12,6 +12,7 @@
   import Pencil from '@lucide/svelte/icons/pencil';
   import Bookmark from '@lucide/svelte/icons/bookmark';
   import Share2 from '@lucide/svelte/icons/share-2';
+  import Printer from '@lucide/svelte/icons/printer';
   import ArrowLeft from '@lucide/svelte/icons/arrow-left';
   import ArrowRight from '@lucide/svelte/icons/arrow-right';
   import ExternalLink from '@lucide/svelte/icons/external-link';
@@ -19,10 +20,10 @@
   import GitCompare from '@lucide/svelte/icons/git-compare';
   import type { Component } from 'svelte';
 
-  export type IconName = 'search' | 'x' | 'chevron-down' | 'check' | 'plus' | 'loader' | 'user' | 'trash' | 'edit' | 'settings' | 'bookmark' | 'share' | 'arrow-left' | 'arrow-right' | 'external-link' | 'shield-check' | 'git-compare' | 'sun';
+  export type IconName = 'search' | 'x' | 'chevron-down' | 'check' | 'plus' | 'loader' | 'user' | 'trash' | 'edit' | 'settings' | 'bookmark' | 'share' | 'print' | 'arrow-left' | 'arrow-right' | 'external-link' | 'shield-check' | 'git-compare' | 'sun';
   interface Props { name: IconName; size?: number; strokeWidth?: number; fill?: string; color?: string; label?: string; }
   let { name, size = 20, strokeWidth = 2, fill = 'none', color = 'currentColor', label }: Props = $props();
-  const icons: Record<IconName, Component> = {search: Search, x: X, 'chevron-down': ChevronDown, check: Check, plus: Plus, loader: LoaderCircle, user: User, trash: Trash2, edit: Pencil, settings: Settings, bookmark: Bookmark, share: Share2, 'arrow-left': ArrowLeft, 'arrow-right': ArrowRight, 'external-link': ExternalLink, 'shield-check': ShieldCheck, 'git-compare': GitCompare, sun: Sun};
+  const icons: Record<IconName, Component> = {search: Search, x: X, 'chevron-down': ChevronDown, check: Check, plus: Plus, loader: LoaderCircle, user: User, trash: Trash2, edit: Pencil, settings: Settings, bookmark: Bookmark, share: Share2, print: Printer, 'arrow-left': ArrowLeft, 'arrow-right': ArrowRight, 'external-link': ExternalLink, 'shield-check': ShieldCheck, 'git-compare': GitCompare, sun: Sun};
   let Selected = $derived(icons[name]);
 </script>
 <Selected {size} {strokeWidth} {fill} {color} aria-label={label} aria-hidden={label ? undefined : 'true'} />

@@ -196,15 +196,13 @@ it('keeps an in-memory editor open if starting a draft cannot persist', async ()
   await fireEvent.input(screen.getByLabelText('Recipe title'),{target:{value:'Soup'}});
   expect(await screen.findByText(/Local storage is unavailable/)).toBeInTheDocument(); expect(navigate).not.toHaveBeenCalled();
 });
-it('requires a choice before formatting source and can undo back to exact original text', async () => {
+it('formats structured recipes as Markdown text and can undo organization', async () => {
   const value = localDraft(true); value.draft.source_text = '  Original source\n'; saveDraft(value); mockApi(() => recipe);
   render(Editor,{draftId:value.id,navigate:vi.fn()}); await fireEvent.click(await screen.findByRole('button',{name:'Edit as text'}));
-  expect(screen.queryByLabelText('Paste or write your recipe')).not.toBeInTheDocument();
-  await fireEvent.click(screen.getByRole('button',{name:'Use formatted current recipe'}));
+  expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue(expect.stringContaining('## Ingredients'));
   expect(screen.getByLabelText('Paste or write your recipe')).not.toHaveValue(value.draft.source_text);
   await fireEvent.click(screen.getByRole('button',{name:'Undo organization'}));
-  await fireEvent.click(screen.getByRole('button',{name:'Edit as text'})); await fireEvent.click(screen.getByRole('button',{name:'Use original text'}));
-  expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue(value.draft.source_text);
+  expect(screen.queryByLabelText('Paste or write your recipe')).not.toBeInTheDocument();
 });
 it('keeps old recovered drafts and labels their comparison as unattributed', async () => {
   localStorage.setItem('notebook:draft:r1',JSON.stringify({draft:{...blank(),title:'Recovered',source_text:' exact\n'},revision:1,key:'key',saved:new Date().toISOString()}));

@@ -11,13 +11,14 @@
   import Modal from './ui/Modal.svelte';
   import Spinner from './ui/Spinner.svelte';
   import Tooltip from './ui/Tooltip.svelte';
+  import Markdown from './ui/Markdown.svelte';
   import BackLink from './ui/BackLink.svelte';
   import Dropdown from './ui/Dropdown.svelte';
   import SegmentedTabs from './ui/SegmentedTabs.svelte';
   let { recipeId, navigate }: { recipeId: string; navigate: (path: string) => void } = $props();
   let recipe = $state<Recipe>(), error = $state(''), status = $state(''), scale = $state(1), scaleMode = $state<'preset' | 'custom'>('preset'), grams = $state(load('grams', false));
   let checked = $state<string[]>(untrack(() => load(`checked:${recipeId}`, []))), bookmarks = $state<string[]>(load('bookmarks', []));
-  let awake = $state(false), deleting = $state(false), deleteOpen = $state(false), weightsBusy = $state(false);
+  let awake = $state(false), deleting = $state(false), deleteOpen = $state(false);
   let lock: WakeLockSentinel | undefined;
   let alive = true;
   const lifetime = new AbortController();
@@ -36,18 +37,6 @@
 
   async function wake() { try { if (awake) { await lock?.release(); awake = false; } else if ('wakeLock' in navigator) { lock = await navigator.wakeLock.request('screen'); if (!alive) {await lock.release(); return;} awake = true; lock.addEventListener('release', () => awake = false); } else status = 'Keeping the screen awake is not supported by this browser.'; } catch { status = 'Could not keep the screen awake. Check your power-saving settings.'; } }
   async function share() { try { if (navigator.share) await navigator.share({title: recipe?.title, url: location.href}); else { await navigator.clipboard.writeText(location.href); status = 'Recipe link copied.'; } } catch(e) { if (!(e instanceof DOMException && e.name === 'AbortError')) status = `Copy this link: ${location.href}`; } }
-  async function recalculateWeights() {
-    weightsBusy = true; error = '';
-    try {
-      const result = await mutate<{enrichment_status?: string}>(`/recipes/${id(recipeId)}/enrich`);
-      if (recipe) recipe = {...recipe, enrichment_status: result.enrichment_status || 'pending'};
-      status = 'Weight estimates queued.';
-    } catch(e) {
-      error = message(e);
-    } finally {
-      weightsBusy = false;
-    }
-  }
   async function removeRecipe() { if (!recipe) return; deleting = true; error = ''; try { await mutate(`/recipes/${id(recipeId)}?expected_revision=${recipe.revision}`, undefined, 'DELETE', lifetime.signal); if (alive) navigate('/'); } catch(e) { if (alive) error = message(e); } finally { if (alive) { deleting = false; deleteOpen = false; } } }
   function openEditor(event: MouseEvent) {
     if (event.defaultPrevented || event.button > 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
@@ -93,21 +82,21 @@
 <BackLink href="/" label="Back to collection" />
 <div class="byline"><p class="eyebrow">From {recipe.author_name || 'Unknown author'}</p></div>
 <h1>{recipe.title}</h1>
-<p class="prose lead">{recipe.description}</p>
+<Markdown source={recipe.description} class="prose lead" />
 <div class="chips">{#each recipe.tags as tag}<Tag label={tag} href={`/?q=${encodeURIComponent(`tag:${tag}`)}`} />{/each}</div>
 {#if recipe.yield_amount}<p>Makes {recipe.yield_amount} {recipe.yield_unit}</p>{/if}
 {#if safeUrl(recipe.source_url)}<p><Button variant="ghost" size="sm" href={safeUrl(recipe.source_url)} target="_blank" rel="noopener noreferrer"><Icon name="external-link" size={16} />Original source</Button></p>{/if}
-{#if recipe.modifications}<section><h2>Our modifications</h2><p class="prose">{recipe.modifications}</p></section>{/if}
+{#if recipe.modifications}<section><h2>Our modifications</h2><Markdown source={recipe.modifications} class="prose" /></section>{/if}
 <div class="toolbar no-print">
   <Button variant="ghost" size="sm" ariaLabel={bookmarks.includes(recipe.id) ? 'Remove saved recipe' : 'Save for later'} onclick={() => bookmarks = bookmarks.includes(recipe!.id) ? bookmarks.filter(value => value !== recipe!.id) : [...bookmarks, recipe!.id]}><Icon name="bookmark" color="var(--ui-accent)" fill={bookmarks.includes(recipe.id) ? 'var(--ui-accent)' : undefined} label={bookmarks.includes(recipe.id) ? 'Saved' : 'Save for later'} /></Button>
   <Button variant="ghost" size="sm" onclick={share}><Icon name="share" size={17} />Share</Button>
-  <Button variant="ghost" size="sm" onclick={() => window.print()}>Print</Button>
+  <Button variant="ghost" size="sm" onclick={() => window.print()}><Icon name="print" size={17} />Print</Button>
   <button class="small-control" aria-label={awake ? 'Stop keeping screen awake' : 'Keep screen awake'} aria-pressed={awake} onclick={wake}><Icon name="sun" color="var(--ui-accent)" fill={awake ? 'var(--ui-accent)' : undefined} label={awake ? 'Screen staying awake' : 'Keep screen awake'} /></button>
   {#if recipe.can_edit}<Button variant="secondary" size="sm" href={`/recipes/${id(recipe.id)}/edit`} onclick={openEditor}><Icon name="edit" size={17} />Edit</Button><Button variant="ghost" size="sm" ariaLabel="Delete recipe" onclick={() => deleteOpen = true}><Icon name="trash" label="Delete recipe" /></Button>{/if}
 </div>
 {#if status}<p role="status" class="notice">{status}</p>{/if}
 {#if recipe.mode === 'text'}<p class="notice">Shared as written. Ingredient scaling and gram tools are unavailable until this recipe is organized.</p>
-<div class="prose recipe-body">{recipe.source_text}</div>{#if recipe.can_edit}<Button variant="secondary" size="sm" href={`/recipes/${id(recipe.id)}/edit`} onclick={openEditor}><Icon name="edit" size={16} />Organize ingredients</Button>{/if}
+<Markdown source={recipe.source_text} class="prose recipe-body" />{#if recipe.can_edit}<Button variant="secondary" size="sm" href={`/recipes/${id(recipe.id)}/edit`} onclick={openEditor}><Icon name="edit" size={16} />Organize ingredients</Button>{/if}
 {:else}
 <section class="no-print" aria-label="Cooking controls">
   <div class="controls-heading"><h2>Ingredients</h2>
@@ -131,26 +120,57 @@
   </div>
 </section>
 <div class="recipe-columns">
-<section><h2 class="sr-only">Ingredients</h2>{#each recipe.ingredient_groups as group}<section class="ingredients">{#if group.name && recipe.ingredient_groups.length > 1}<h3>{group.name}</h3>{/if}{#each group.ingredients as row}{@const weight = gramText(row,factor)}<div class:checked={checked.includes(row.id)}><label class="ingredient"><input type="checkbox" checked={checked.includes(row.id)} onchange={() => checked = checked.includes(row.id) ? checked.filter(value => value !== row.id) : [...checked, row.id]}>
-  {#if scaleBadge(row)}<span class="scale-badge">{scaledAmount(1)}×</span>{/if}
-  {#if grams && weight}
-    <span>{row.grams?.estimated === false ? '' : '≈ '}<Tooltip text={gramExplanation(row)}><span class="gram-amount">{weight}</span></Tooltip>{' '}{ingredientTail(row) || row.original_text}</span>
-  {:else if grams}
-    <span><Tooltip text={gramUnavailableExplanation(row)}><span class="gram-amount unavailable">{originalAmount(row) || ingredientText(row,factor)}</span></Tooltip>{#if originalAmount(row)}{' '}{ingredientTail(row)}{/if}</span>
-  {:else}
-    <span>{ingredientText(row,factor)}</span>
+<section>
+  <h2 class="sr-only">Ingredients</h2>
+  {#if grams && ['pending', 'running', 'retry'].includes(recipe.enrichment_status)}
+    <p class="weight-state" role="status"><Spinner label="Estimating ingredient weights" size={18} /> Estimating ingredient weights…</p>
+  {:else if grams && recipe.enrichment_status === 'failed'}
+    <p class="notice error" role="alert">Ingredient weight estimates failed. Original amounts are shown.</p>
   {/if}
-</label></div>{/each}</section>{/each}</section>
-<section><h2>Directions</h2><div class="prose">{recipe.directions}</div></section>
+  {#each recipe.ingredient_groups as group}
+    <section class="ingredients">
+      {#if group.name && recipe.ingredient_groups.length > 1}<h3>{group.name}</h3>{/if}
+      {#each group.ingredients as row}
+        {@const weight = gramText(row,factor)}
+        {@const amount = originalAmount(row)}
+        {@const tail = ingredientTail(row)}
+        <div class="ingredient" class:checked={checked.includes(row.id)}>
+          <input type="checkbox" aria-label={`Check off ${tail || row.original_text || 'ingredient'}`} checked={checked.includes(row.id)} onchange={() => checked = checked.includes(row.id) ? checked.filter(value => value !== row.id) : [...checked, row.id]}>
+          <span class="ingredient-copy">
+            {#if scaleBadge(row)}<span class="scale-badge">{scaledAmount(1)}×</span>{/if}
+            {#if grams && ['pending', 'running', 'retry'].includes(recipe.enrichment_status)}
+              <button type="button" class="amount-trigger" onclick={() => grams = true}>{amount || ingredientText(row,factor)}</button>{#if amount && tail}{' '}{tail}{/if}
+            {:else if grams && weight}
+              {#if row.grams?.estimated !== false}≈ {/if}<Tooltip text={gramExplanation(row)}><button type="button" class="amount-trigger" onclick={() => grams = true}>{weight}</button></Tooltip>{#if tail}{' '}{tail}{:else if row.original_text}{' '}{row.original_text}{/if}
+            {:else if grams}
+              <Tooltip text={gramUnavailableExplanation(row)}><button type="button" class="amount-trigger unavailable" onclick={() => grams = true}>{amount || ingredientText(row,factor)}</button></Tooltip>{#if amount && tail}{' '}{tail}{/if}
+            {:else if amount}
+              {#if hasGramWeight(row)}
+                <Tooltip text={gramExplanation(row)}><button type="button" class="amount-trigger" onclick={() => grams = true}>{amount}</button></Tooltip>
+              {:else if ['pending', 'running', 'retry'].includes(recipe.enrichment_status)}
+                <button type="button" class="amount-trigger" onclick={() => grams = true}>{amount}</button>
+              {:else}
+                <Tooltip text={gramUnavailableExplanation(row)}><button type="button" class="amount-trigger unavailable" onclick={() => grams = true}>{amount}</button></Tooltip>
+              {/if}
+              {#if tail}{' '}{tail}{/if}
+            {:else}
+              <button type="button" class="amount-trigger" onclick={() => grams = true}>{ingredientText(row,factor)}</button>
+            {/if}
+          </span>
+        </div>
+      {/each}
+    </section>
+  {/each}
+</section>
+<section><h2>Directions</h2><Markdown source={recipe.directions} class="prose" /></section>
 </div>
-{#if recipe.notes}<section><h2>Notes</h2><div class="prose">{recipe.notes}</div></section>{/if}
+{#if recipe.notes}<section><h2>Notes</h2><Markdown source={recipe.notes} class="prose" /></section>{/if}
 {/if}
-{#if recipe.enrichment_status && recipe.enrichment_status !== 'complete'}<p class="no-print">Ingredient weights: {recipe.enrichment_status}{#if recipe.can_edit} <button disabled={weightsBusy} onclick={recalculateWeights}>{weightsBusy ? 'Queueing…' : 'Retry weight estimates'}</button>{/if}</p>{:else if recipe.can_edit}<p class="no-print"><button disabled={weightsBusy} onclick={recalculateWeights}>{weightsBusy ? 'Queueing…' : 'Recalculate weight estimates'}</button></p>{/if}
 <section class="photos no-print"><h2>Photos</h2><Photos {recipeId} /></section>
 </article>
 <Modal bind:open={deleteOpen} title="Delete recipe"><p>This recipe will no longer appear in the collection.</p><div class="dialog-actions"><Button variant="ghost" onclick={() => deleteOpen = false}>Cancel</Button><Button variant="danger" disabled={deleting} onclick={removeRecipe}>{#if deleting}<Spinner label="Deleting recipe" size={16} />Deleting…{:else}Delete recipe{/if}</Button></div></Modal>
 {:else if !error}<p role="status">Opening the recipe…</p>{/if}
 
 <style>
-  .byline,.controls-heading{display:flex;align-items:center;gap:.5rem}.byline .eyebrow{margin:0}.controls-heading{justify-content:flex-start;margin-bottom:.5rem}.controls-heading h2{margin:0}.small-control{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:.3rem .5rem;border:1px solid transparent;border-radius:.4rem;background:transparent;color:var(--ui-text);cursor:pointer}.small-control:hover{border-color:var(--ui-control-border);background:var(--ui-surface)}.ingredient-settings{box-sizing:border-box;width:18rem;max-width:calc(100vw - 2.2rem);padding:.35rem;display:flex;flex-direction:column;gap:.8rem}.settings-group{display:flex;flex-direction:column;gap:.35rem}.settings-label{font-size:.8rem;font-weight:650;color:var(--muted)}.ingredient-settings label{display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-size:.9rem}.ingredient-settings input{width:6rem;min-height:32px;padding:.25rem .4rem}.ingredient{align-items:center}.ingredient input{margin:0}.gram-amount{line-height:inherit;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px;cursor:help}
+  .byline,.controls-heading{display:flex;align-items:center;gap:.5rem}.byline .eyebrow{margin:0}.controls-heading{justify-content:flex-start;margin-bottom:.5rem}.controls-heading h2{margin:0}.small-control{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:.3rem .5rem;border:1px solid transparent;border-radius:.4rem;background:transparent;color:var(--ui-text);cursor:pointer}.small-control:hover{border-color:var(--ui-control-border);background:var(--ui-surface)}.ingredient-settings{box-sizing:border-box;width:18rem;max-width:calc(100vw - 2.2rem);padding:.35rem;display:flex;flex-direction:column;gap:.8rem}.settings-group{display:flex;flex-direction:column;gap:.35rem}.settings-label{font-size:.8rem;font-weight:650;color:var(--muted)}.ingredient-settings label{display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-size:.9rem}.ingredient-settings input{width:6rem;min-height:32px;padding:.25rem .4rem}.ingredient{align-items:center}.ingredient input{margin:0}.ingredient-copy{min-width:0}.amount-trigger{display:inline;padding:0;min-height:0;border:0;border-radius:0;background:transparent;color:inherit;font:inherit;font-weight:inherit;line-height:inherit;text-align:left;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px;cursor:pointer}.amount-trigger:hover{background:transparent;color:var(--ui-accent-strong);text-decoration-style:solid}.weight-state{display:flex;align-items:center;gap:.5rem;color:var(--muted)}
 </style>

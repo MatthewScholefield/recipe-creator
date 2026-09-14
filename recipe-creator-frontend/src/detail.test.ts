@@ -145,7 +145,7 @@ it('shows a recommended gram estimate with uncertainty and details in its toolti
     grams:{amount:null,low:110,high:130,estimated:true,basis:'Typical flour density',assumptions:['Level cup']},
   }]}]};
   mockApi(ranged); render(Detail,{recipeId:'r1',navigate:vi.fn()}); await screen.findByRole('heading',{name:'Soup'});
-  expect(screen.getByRole('button',{name:'Recalculate weight estimates'})).toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:/Recalculate|Retry weight/})).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Adjust ingredient scale'}));
   await fireEvent.click(screen.getByRole('tab',{name:'Grams'}));
   const grams = screen.getByText('120 g');
