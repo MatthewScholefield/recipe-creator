@@ -154,12 +154,30 @@ test('home groups legacy classifiers once and combines full-catalog keyboard tag
   verify();
 });
 
-test('mobile quick tags stay on one row with visible search and no clipped keyboard targets', async ({page}) => {
+test('mobile navigation stays on one row and expands search over the header', async ({page}) => {
   await page.setViewportSize({width: 375, height: 812});
   const verify = await mockApi(page);
   await page.goto('/');
-  const toggle = page.getByRole('button', {name: 'Search tags', exact: true});
-  await expect(toggle).toBeInViewport();
+  const header = page.locator('.site-header');
+  const searchToggle = page.getByRole('button', {name: 'Open recipe search', exact: true});
+  const searchbox = page.getByRole('searchbox', {name: 'Search recipes', exact: true});
+  const addRecipe = header.getByRole('link', {name: 'Add recipe', exact: true});
+  await expect(searchToggle).toBeVisible();
+  await expect(searchbox).toBeHidden();
+  await expect(addRecipe).toBeVisible();
+  await expect(addRecipe.locator('.add-label')).toBeHidden();
+  const closedHeight = (await header.boundingBox())!.height;
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await searchToggle.click();
+  await expect(searchbox).toBeVisible();
+  await expect(searchbox).toBeFocused();
+  expect((await header.boundingBox())!.height).toBe(closedHeight);
+  await searchbox.press('Escape');
+  await expect(searchbox).toBeHidden();
+  await expect(searchToggle).toBeFocused();
+
+  const tagToggle = page.getByRole('button', {name: 'Search tags', exact: true});
+  await expect(tagToggle).toBeInViewport();
   await expect(page.locator('.quick-tags a').first()).toBeVisible();
   const bounds = await page.locator('.quick-tags').evaluate(element => {
     const row = element.getBoundingClientRect();
@@ -170,9 +188,12 @@ test('mobile quick tags stay on one row with visible search and no clipped keybo
   });
   expect(new Set(bounds.map(value => value.top)).size).toBeLessThanOrEqual(1);
   expect(bounds.every(value => value.inside || (value.inert && value.hidden))).toBe(true);
-  await toggle.focus(); await page.keyboard.press('Enter');
-  await selectTag(page, 'vegetarian');
-  await expect(page.locator('.active-filters').getByRole('link', {name: 'vegetarian', exact: true})).toBeVisible();
+  await tagToggle.focus(); await page.keyboard.press('Enter');
+  const tagInput = page.getByRole('combobox', {name: 'Search tags', exact: true});
+  await tagInput.fill('vegetarian');
+  await expect(page.getByRole('option', {name: 'vegetarian', exact: true})).toBeVisible();
+  await tagInput.press('Enter');
+  await expect(page.locator('.active-filters').getByRole('link', {name: 'Remove vegetarian', exact: true})).toBeVisible();
   verify();
 });
 

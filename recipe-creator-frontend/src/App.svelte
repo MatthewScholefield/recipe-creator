@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import Browse from './Browse.svelte';
   import Detail from './Detail.svelte';
   import IdentityPrompt from './IdentityPrompt.svelte';
@@ -17,7 +17,8 @@
   let route = $state(location.pathname + location.search);
   let pairingVersion = $state(0);
   let pairingToken = $state(''), naming = $state(false), identityError = $state('');
-  let search = $state(new URLSearchParams(location.search).get('q') || ''), resultsLoading = $state(false);
+  let search = $state(new URLSearchParams(location.search).get('q') || ''), resultsLoading = $state(false), mobileSearchOpen = $state(false);
+  let searchInput: HTMLInputElement, mobileSearchTrigger: HTMLButtonElement;
   function readRoute() { route = location.pathname + location.search; search = new URLSearchParams(location.search).get('q') || ''; }
   function navigate(path: string, options?: {replace?: boolean}) { if (options?.replace) history.replaceState({}, '', path); else history.pushState({}, '', path); readRoute(); window.scrollTo({top: 0}); }
   async function loadIdentity() {identityError = ''; try {await refreshIdentity();} catch(error) {identityError = message(error);} }
@@ -43,6 +44,16 @@
     navigate(browseUrl({q: search, tags: params.getAll('tag'), saved: pathname === '/saved'}));
   }
   function setResultsLoading(loading: boolean) { resultsLoading = loading; }
+  async function openMobileSearch() {
+    mobileSearchOpen = true;
+    await tick();
+    searchInput.focus();
+  }
+  async function closeMobileSearch() {
+    mobileSearchOpen = false;
+    await tick();
+    mobileSearchTrigger.focus();
+  }
   $effect(() => {
     search; routeSearch;
     if (search === routeSearch) return;
@@ -53,11 +64,12 @@
 <a class="skip" href="#main">Skip to recipes</a>
 <header class="site-header">
   <a class="brand" href="/">{appState.copy.site_title}{#if appState.copy.site_tagline}<span>{appState.copy.site_tagline}</span>{/if}</a>
-  <form class="search" role="search" onsubmit={(event) => {event.preventDefault(); submitSearch();}}>
+  <form class="search" class:mobile-open={mobileSearchOpen} role="search" onsubmit={(event) => {event.preventDefault(); submitSearch();}}>
     <span class="search-indicator">{#if searchPending}<Spinner label="Searching recipes" size={18} />{:else}<Icon name="search" size={18} />{/if}</span>
-    <label class="sr-only" for="search">Search recipes</label><input id="search" type="search" bind:value={search} placeholder="Search recipes" autocomplete="off">
+    <label class="sr-only" for="search">Search recipes</label><input bind:this={searchInput} id="search" type="search" bind:value={search} placeholder="Search recipes" autocomplete="off" onkeydown={(event) => {if (event.key === 'Escape' && mobileSearchOpen) {event.preventDefault(); void closeMobileSearch();}}}>
+    <button class="search-close" type="button" aria-label="Close recipe search" title="Close recipe search" onclick={() => void closeMobileSearch()}><Icon name="x" size={20} /></button>
   </form>
-  <nav aria-label="Main"><Button variant="primary" size="sm" href="/new"><Icon name="plus" size={18} /> Add recipe</Button><IconButton href="/saved" ariaLabel="Saved recipes" title="Saved recipes"><Icon name="bookmark" size={18} /></IconButton></nav>
+  <nav aria-label="Main"><Button variant="primary" size="sm" href="/new" ariaLabel="Add recipe" title="Add recipe" class="mobile-add"><Icon name="plus" size={18} /><span class="add-label">Add recipe</span></Button><button bind:this={mobileSearchTrigger} class="mobile-search-toggle" type="button" aria-label="Open recipe search" title="Search recipes" aria-controls="search" aria-expanded={mobileSearchOpen} onclick={() => void openMobileSearch()}><Icon name="search" size={20} /></button><IconButton href="/saved" ariaLabel="Saved recipes" title="Saved recipes"><Icon name="bookmark" size={18} /></IconButton></nav>
   <div class="profile-menu">
     <Dropdown label="Profile menu">
       {#snippet trigger(open)}<button type="button" class:anonymous={!user} aria-label="Profile menu" aria-haspopup="menu" aria-expanded={open}><Icon name="user" /><span>{user?.display_name || 'Anonymous'}</span><Icon name="chevron-down" size={16} /></button>{/snippet}
@@ -84,7 +96,15 @@
 </main>
 {#if appState.copy.footer_text}<footer>{appState.copy.footer_text}</footer>{/if}
 <style>
-  .search{position:relative;align-items:center}.search-indicator{position:absolute;left:.85rem;z-index:1;display:inline-flex;color:var(--muted);pointer-events:none}.search input{width:100%;padding-left:2.55rem;border-radius:999px;background:var(--paper);box-shadow:0 1px 2px rgb(32 63 44/.06)}.search input:focus{border-color:var(--green);box-shadow:0 0 0 3px rgb(53 91 67/.14)}
+  .search{position:relative;align-items:center}.search-indicator{position:absolute;left:.85rem;z-index:1;display:inline-flex;color:var(--muted);pointer-events:none}.search input{width:100%;padding-left:2.55rem;border-radius:999px;background:var(--paper);box-shadow:0 1px 2px rgb(32 63 44/.06)}.search input:focus{border-color:var(--green);box-shadow:0 0 0 3px rgb(53 91 67/.14)}.mobile-search-toggle,.search-close{display:none}
   .profile-menu{margin-left:auto}.profile-menu :global(button){display:flex;align-items:center;gap:.4rem}.anonymous{color:var(--ui-text-muted,#666)}
-  @media(max-width:600px){.profile-menu :global(button span){max-width:8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+  @media(max-width:620px){
+    .site-header{position:relative;flex-wrap:nowrap;gap:.35rem;min-height:76px}
+    .brand{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}.brand span{overflow:hidden;text-overflow:ellipsis}
+    .site-header nav{margin-left:0;gap:.25rem}
+    .profile-menu{margin-left:0}.profile-menu :global(button){width:44px;padding:0;gap:0}.profile-menu :global(button > span),.profile-menu :global(button > svg:last-child){display:none}
+    .add-label{display:none}.site-header :global(.mobile-add){width:44px;padding:0;border-radius:50%}
+    .mobile-search-toggle,.search-close{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;flex:none;padding:0;border-radius:50%;background:var(--paper)}
+    .search{display:none}.search.mobile-open{position:absolute;inset:0;z-index:4;display:flex;order:initial;flex-basis:auto;gap:.5rem;margin:0;padding:1rem;background:#f7f4ec}.search.mobile-open .search-indicator{left:1.85rem}.search.mobile-open input{min-width:0;height:44px}
+  }
 </style>
