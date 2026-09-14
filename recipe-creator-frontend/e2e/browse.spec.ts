@@ -166,6 +166,9 @@ test('mobile navigation stays on one row and expands search over the header', as
   await expect(searchbox).toBeHidden();
   await expect(addRecipe).toBeVisible();
   await expect(addRecipe.locator('.add-label')).toBeHidden();
+  const [searchBounds, addBounds] = await Promise.all([searchToggle.boundingBox(), addRecipe.boundingBox()]);
+  expect(searchBounds!.x).toBeLessThan(addBounds!.x);
+  expect(addBounds!.width).toBe(addBounds!.height);
   const closedHeight = (await header.boundingBox())!.height;
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await searchToggle.click();

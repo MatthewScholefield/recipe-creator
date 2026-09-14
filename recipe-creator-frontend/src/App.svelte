@@ -69,7 +69,7 @@
     <label class="sr-only" for="search">Search recipes</label><input bind:this={searchInput} id="search" type="search" bind:value={search} placeholder="Search recipes" autocomplete="off" onkeydown={(event) => {if (event.key === 'Escape' && mobileSearchOpen) {event.preventDefault(); void closeMobileSearch();}}}>
     <button class="search-close" type="button" aria-label="Close recipe search" title="Close recipe search" onclick={() => void closeMobileSearch()}><Icon name="x" size={20} /></button>
   </form>
-  <nav aria-label="Main"><Button variant="primary" size="sm" href="/new" ariaLabel="Add recipe" title="Add recipe" class="mobile-add"><Icon name="plus" size={18} /><span class="add-label">Add recipe</span></Button><button bind:this={mobileSearchTrigger} class="mobile-search-toggle" type="button" aria-label="Open recipe search" title="Search recipes" aria-controls="search" aria-expanded={mobileSearchOpen} onclick={() => void openMobileSearch()}><Icon name="search" size={20} /></button><IconButton href="/saved" ariaLabel="Saved recipes" title="Saved recipes"><Icon name="bookmark" size={18} /></IconButton></nav>
+  <nav aria-label="Main"><button bind:this={mobileSearchTrigger} class="mobile-search-toggle" type="button" aria-label="Open recipe search" title="Search recipes" aria-controls="search" aria-expanded={mobileSearchOpen} onclick={() => void openMobileSearch()}><Icon name="search" size={20} /></button><Button variant="primary" size="sm" href="/new" ariaLabel="Add recipe" title="Add recipe" class="mobile-add"><Icon name="plus" size={18} /><span class="add-label">Add recipe</span></Button><IconButton href="/saved" ariaLabel="Saved recipes" title="Saved recipes"><Icon name="bookmark" size={18} /></IconButton></nav>
   <div class="profile-menu">
     <Dropdown label="Profile menu">
       {#snippet trigger(open)}<button type="button" class:anonymous={!user} aria-label="Profile menu" aria-haspopup="menu" aria-expanded={open}><Icon name="user" /><span>{user?.display_name || 'Anonymous'}</span><Icon name="chevron-down" size={16} /></button>{/snippet}
@@ -103,7 +103,7 @@
     .brand{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}.brand span{overflow:hidden;text-overflow:ellipsis}
     .site-header nav{margin-left:0;gap:.25rem}
     .profile-menu{margin-left:0}.profile-menu :global(button){width:44px;padding:0;gap:0}.profile-menu :global(button > span),.profile-menu :global(button > svg:last-child){display:none}
-    .add-label{display:none}.site-header :global(.mobile-add){width:44px;padding:0;border-radius:50%}
+    .add-label{display:none}.site-header :global(.mobile-add){box-sizing:border-box;width:44px;height:44px;flex:0 0 44px;padding:0;border-radius:50%}
     .mobile-search-toggle,.search-close{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;flex:none;padding:0;border-radius:50%;background:var(--paper)}
     .search{display:none}.search.mobile-open{position:absolute;inset:0;z-index:4;display:flex;order:initial;flex-basis:auto;gap:.5rem;margin:0;padding:1rem;background:#f7f4ec}.search.mobile-open .search-indicator{left:1.85rem}.search.mobile-open input{min-width:0;height:44px}
   }
