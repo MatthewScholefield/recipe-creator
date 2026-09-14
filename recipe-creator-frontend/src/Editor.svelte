@@ -35,11 +35,11 @@
   let needsReview = $state(false);
   let review = $state<null | {status: 'loading' | 'ready' | 'error'; candidate: RecipeDraft; latest?: Recipe; error: string}>(null);
   let reviewEpoch = $state(0), completedRecipeId = $state(''), completionError = $state('');
-  let activeId = $state(''), draftName = $state(''), naming = $state(false), discard = $state(false), discardChanges = $state(false);
+  let activeId = $state(''), discard = $state(false), discardChanges = $state(false);
   let sectionToDelete = $state<{id: string; label: string} | null>(null);
   let legacyAvailable = $state(false), recovered = $state<LegacyDraft | null>(null);
   let tags = $state<string[]>([...MEAL_CLASSIFIERS]), tagsError = $state('');
-  let publishKey: string = crypto.randomUUID(), baseline = '', baselineName = '', lastSaved: string | null = null, alive = true, writing = false;
+  let publishKey: string = crypto.randomUUID(), baseline = '', lastSaved: string | null = null, alive = true, writing = false;
   let autosaveStopped = false, saveControl = $state<HTMLButtonElement>();
   const guard = new ParseGuard(), reviewGuard = new ParseGuard(), lifetime = new AbortController();
   const inputs = new Map<string, HTMLInputElement>();
@@ -57,13 +57,13 @@
 
   function resume(value: LocalDraft) {
     guard.cancel(); parsing = false; busy = false;
-    activeId = value.id; draftName = value.name; draft = copy(value.draft); undo = value.undo ? copy(value.undo) : undefined;
+    activeId = value.id; draft = copy(value.draft); undo = value.undo ? copy(value.undo) : undefined;
     dirty = copy(value.ingredientLines || {}); undoLines = {}; publishKey = value.publishKey;
-    baseline = JSON.stringify(draft); baselineName = value.name; lastSaved = JSON.stringify(readDraft(value.id)); external = false; error = '';
+    baseline = JSON.stringify(draft); lastSaved = JSON.stringify(readDraft(value.id)); external = false; error = '';
   }
   function flush(force = false) {
     if (autosaveStopped || !ready || !allowed || !editing || recovered || external) return false;
-    if (!force && JSON.stringify(draft) === baseline && draftName === baselineName) return false;
+    if (!force && JSON.stringify(draft) === baseline) return false;
     if (activeId && !writing && JSON.stringify(readDraft(activeId)) !== lastSaved) {
       external = true; cancelWork(); return false;
     }
@@ -71,8 +71,8 @@
     let ok: boolean;
     writing = true;
     if (activeId) {
-      const local: LocalDraft = {...value, version: 2, id: activeId, name: draftName.trim().slice(0, 120) || 'Untitled recipe', updatedAt: new Date().toISOString(), publishKey};
-      ok = saveDraft(local); if (ok) { lastSaved = JSON.stringify(local); baselineName = local.name; }
+      const local: LocalDraft = {...value, version: 2, id: activeId, updatedAt: new Date().toISOString(), publishKey};
+      ok = saveDraft(local); if (ok) lastSaved = JSON.stringify(local);
     } else ok = save(storageKey, {...value, revision, ...(recipeId && editBase ? {base: copy(editBase)} : {}), key: publishKey, saved: new Date().toISOString()});
     writing = false;
     persisted = ok ? 'Draft saved on this device.' : 'Local storage is unavailable. Keep this tab open or copy your recipe before leaving.';
@@ -80,7 +80,7 @@
   }
   async function fork() {
     const snapshot = copy(draft), previous = undo ? copy(undo) : undefined, lines = copy(dirty);
-    const value = createDraft(draftName || draft.title, false);
+    const value = createDraft(false);
     resume({...value, draft: snapshot, undo: previous, ingredientLines: lines});
     const ok = flush(true); await tick();
     if (ok && alive) navigate(draftHref(value.id), {replace: true});
@@ -142,7 +142,7 @@
             const value = readDraft(draftId);
             if (value) resume(value);
             else error = 'This draft is missing or unreadable. Start a new recipe, or return to your drafts.';
-          } else resume(createDraft(undefined, false));
+          } else resume(createDraft(false));
         }
         ready = !error;
       } catch (e) { if (alive) error = message(e); }
@@ -151,14 +151,14 @@
       if (activeId && !writing && JSON.stringify(readDraft(activeId)) !== lastSaved) { external = true; cancelWork(); }
     });
     const leave = (event: BeforeUnloadEvent) => {
-      if (!autosaveStopped && editing && (JSON.stringify(draft) !== baseline || draftName !== baselineName)) { flush(); event.preventDefault(); event.returnValue = ''; }
+      if (!autosaveStopped && editing && JSON.stringify(draft) !== baseline) { flush(); event.preventDefault(); event.returnValue = ''; }
     };
     window.addEventListener('beforeunload', leave);
     return () => { flush(); alive = false; lifetime.abort(); guard.cancel(); reviewGuard.cancel(); unsubscribe(); window.removeEventListener('beforeunload', leave); };
   });
   $effect(() => {
     // Only content dependencies schedule autosave; timestamps/status must not make a loop.
-    JSON.stringify(draft); JSON.stringify(undo); JSON.stringify(dirty); draftName;
+    JSON.stringify(draft); JSON.stringify(undo); JSON.stringify(dirty);
     if (autosaveStopped || !ready || !allowed || !editing || recovered || external) return;
     const timer = setTimeout(flush, 350); return () => clearTimeout(timer);
   });
@@ -443,9 +443,8 @@
     {:else}
     {#if !recipeId && legacyAvailable}<section aria-label="Draft recovery"><p>An older draft also needs recovery. Your other drafts are unchanged.</p><button onclick={recoverOldNew}>Recover older draft as new</button></section>{/if}
     {#if external}<section class="notice" role="alert"><h2>Changed in another tab</h2><p>Autosave is paused. Keep your copy as a new draft, or reload the stored version.</p><button onclick={reloadLocal}>Reload draft</button><button onclick={fork}>Save as new draft</button></section>{/if}
-    {#if activeId}<div class="toolbar draft-actions"><span class="draft-badge">Draft · {draftName}</span><button type="button" class="ghost" disabled={busy || external} onclick={() => naming = !naming}><Icon name="edit" size={16} />Rename</button><button type="button" class="ghost" disabled={busy} onclick={() => discard = !discard}><Icon name="trash" size={16} />Discard</button><Button variant="ghost" size="sm" href="/new"><Icon name="plus" size={16} />Start another recipe</Button></div>
-      {#if naming}<label>Draft name<input maxlength="120" bind:value={draftName} disabled={busy || external}></label><button onclick={() => { draftName = draftName.trim() || 'Untitled recipe'; flush(); naming = false; }}>Done</button>{/if}
-      {#if discard}<section class="notice"><p>Discard “{draftName}” from this device?</p><button onclick={discardDraft}>Discard draft</button><button onclick={() => discard = false}>Keep draft</button></section>{/if}
+    {#if activeId}<div class="toolbar draft-actions"><span class="draft-badge">Draft · {draft.title.trim() || 'Untitled recipe'}</span><button type="button" class="ghost" disabled={busy} onclick={() => discard = !discard}><Icon name="trash" size={16} />Discard</button></div>
+      {#if discard}<section class="notice"><p>Discard “{draft.title.trim() || 'Untitled recipe'}” from this device?</p><button onclick={discardDraft}>Discard draft</button><button onclick={() => discard = false}>Keep draft</button></section>{/if}
     {/if}
     <form onsubmit={(event) => {event.preventDefault(); void publish();}} oninput={changed}>
       <fieldset class="editor-fields" disabled={busy || parsing || !!recovered} aria-busy={busy || parsing}>

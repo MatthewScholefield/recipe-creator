@@ -19,7 +19,7 @@ function mockApi(handler: (url: string, init?: RequestInit) => unknown | Promise
   vi.stubGlobal('fetch', fetcher); return fetcher;
 }
 function localDraft(structured = false) {
-  const value = createDraft('Soup'); value.draft = structured ? {...recipe} : {...blank(),title:'Soup',source_text:'  Exact source\n'}; saveDraft(value); return value;
+  const value = createDraft(); value.draft = structured ? {...recipe} : {...blank(),title:'Soup',source_text:'  Exact source\n'}; saveDraft(value); return value;
 }
 function parseResult() { return {description:'',ingredient_groups:[{id:'g1',name:'',ingredients:[{...ingredient(),id:'i1',original_text:'2 eggs',quantity:'2',name:'eggs'}]}],directions:'  Exact source\n',notes:'',yield_amount:'4',yield_unit:'servings',source_url:'https://example.com'}; }
 function lineResult(body: string) {
@@ -72,6 +72,7 @@ it('does not substitute another draft for a missing draft URL', async () => {
 it('organizes anonymously from the direct recipe result and shows the bottom name tooltip', async () => {
   const value = localDraft(); const fetcher = mockApi(url => url === '/api/parse' ? parseResult() : recipe, false);
   render(Editor,{draftId:value.id,navigate:vi.fn()}); await screen.findByLabelText('Paste or write your recipe');
+  expect(screen.queryByRole('button',{name:'Start another recipe'})).not.toBeInTheDocument();
   const publish = screen.getByRole('button',{name:'Publish recipe'}); expect(publish).toBeDisabled();
   const wrapper = screen.getByRole('group',{name:'Set your name to publish'}); expect(wrapper).toHaveAttribute('tabindex','0');
   await fireEvent.focusIn(wrapper); expect(await screen.findByRole('tooltip')).toHaveTextContent('Set your name to publish');
@@ -217,7 +218,7 @@ it('keeps an in-memory editor open if starting a draft cannot persist', async ()
 it('formats structured recipes as Markdown text and can undo organization', async () => {
   const value = localDraft(true); value.draft.source_text = '  Original source\n'; saveDraft(value); mockApi(() => recipe);
   render(Editor,{draftId:value.id,navigate:vi.fn()}); await fireEvent.click(await screen.findByRole('button',{name:'Edit as text'}));
-  expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue(expect.stringContaining('## Ingredients'));
+  expect((screen.getByLabelText('Paste or write your recipe') as HTMLTextAreaElement).value).toContain('## Ingredients');
   expect(screen.getByLabelText('Paste or write your recipe')).not.toHaveValue(value.draft.source_text);
   await fireEvent.click(screen.getByRole('button',{name:'Undo organization'}));
   expect(screen.queryByLabelText('Paste or write your recipe')).not.toBeInTheDocument();

@@ -117,7 +117,7 @@ it('debounces header searches and keeps a loader visible until matching results 
   await waitFor(() => expect(screen.queryByLabelText('Searching recipes')).not.toBeInTheDocument());
 });
 it('remounts the editor when only the draft query changes', async () => {
-  const first = createDraft('First'), second = createDraft('Second'); first.draft.title = 'First recipe'; second.draft.title = 'Second recipe'; saveDraft(first); saveDraft(second);
+  const first = createDraft(), second = createDraft(); first.draft.title = 'First recipe'; second.draft.title = 'Second recipe'; saveDraft(first); saveDraft(second);
   history.replaceState({}, '', draftHref(first.id));
   mockApi(url => url === '/api/session' ? identity : {revision:0,copy:DEFAULT_SITE_COPY});
   render(App); expect(await screen.findByLabelText('Recipe title')).toHaveValue('First recipe');

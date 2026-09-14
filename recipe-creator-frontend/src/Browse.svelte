@@ -136,7 +136,7 @@
   <div><p class="eyebrow">Recipes</p><h1>{savedOnly ? 'Saved recipes' : active ? 'Results' : appState.copy.home_title}</h1>{#if !savedOnly && !active && appState.copy.home_intro}<p>{appState.copy.home_intro}</p>{/if}</div>
 </div>
 
-{#if !savedOnly && drafts.length}<section class="drafts" aria-labelledby="drafts-heading"><div><h2 id="drafts-heading">Drafts</h2></div><div class="cards">{#each drafts as draft (draft.id)}<RecipeCard title={draft.name} href={draftHref(draft.id)} isDraft updatedAt={draft.updatedAt} />{/each}</div></section>{/if}
+{#if !savedOnly && drafts.length}<section class="drafts" aria-labelledby="drafts-heading"><div><h2 id="drafts-heading">Drafts</h2></div><div class="cards">{#each drafts as draft (draft.id)}<RecipeCard title={draft.title} href={draftHref(draft.id)} isDraft updatedAt={draft.updatedAt} />{/each}</div></section>{/if}
 
 <section class="tag-filters" aria-label="Recipe filters"><div class="quick-tags" use:clipQuickTags={quickTags}>{#each quickTags as tag}<Tag label={tag} href={link([...selected, tag])} />{/each}</div><TagPicker tags={tags} selected={selected} label="Search tags" placeholder="Search tags" compact allowCreate={false} onchange={setTags} />{#if tagError}<p class="notice" role="status">{tagError}</p>{/if}</section>
 

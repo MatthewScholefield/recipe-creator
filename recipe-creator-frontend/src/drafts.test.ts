@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { blank } from './recipe';
-import { createDraft, deleteDraft, draftHref, EDIT_DRAFT_MAX_AGE_MS, listDrafts, migrateLegacyDraft, readDraft, readEditDraft, readLegacyDraft, recoverLegacyDraft, renameDraft, saveDraft, SIGNIFICANT_DRAFT_CHANGE_SIZE, subscribeDrafts } from './drafts';
+import { createDraft, deleteDraft, draftHref, EDIT_DRAFT_MAX_AGE_MS, listDrafts, migrateLegacyDraft, readDraft, readEditDraft, readLegacyDraft, recoverLegacyDraft, saveDraft, SIGNIFICANT_DRAFT_CHANGE_SIZE, subscribeDrafts } from './drafts';
 
 beforeEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
 describe('independent local drafts', () => {
-  it('creates separate names and keys, lists, renames and deletes only the target', () => {
-    const a = createDraft('  Soup  '), b = createDraft('Soup');
+  it('creates separate drafts with titles and deletes only the target', () => {
+    const a = createDraft(), b = createDraft();
+    a.draft.title = 'Soup'; b.draft.title = 'Stew'; saveDraft(a); saveDraft(b);
     expect(a.id).not.toBe(b.id); expect(a.publishKey).not.toBe(a.id); expect(a.publishKey).not.toBe(b.publishKey);
-    expect(listDrafts()).toHaveLength(2); expect(renameDraft(a.id, ' Stew ')).toBe(true);
-    expect(readDraft(a.id)?.name).toBe('Stew'); expect(readDraft(b.id)?.name).toBe('Soup');
+    expect(listDrafts().map(item => item.title)).toEqual(expect.arrayContaining(['Soup', 'Stew']));
     expect(draftHref(b.id)).toBe(`/new?draft=${b.id}`); expect(deleteDraft(a.id)).toBe(true);
-    expect(readDraft(b.id)?.publishKey).toBe(b.publishKey);
+    expect(readDraft(b.id)?.draft.title).toBe('Stew'); expect(listDrafts()).toHaveLength(1);
   });
   it('ignores corrupt entries and retains exact authored input and undo', () => {
     const a = createDraft(); a.draft.source_text = '  exact\n\n'; a.undo = {...blank(), notes:'  notes\n'}; a.ingredientLines = {'legacy-row':'  2 eggs '};
@@ -26,10 +26,10 @@ describe('independent local drafts', () => {
   });
   it('returns an in-memory draft when storage is blocked', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
-    const a = createDraft('Safe'); expect(a.draft.mode).toBe('text'); expect(saveDraft(a)).toBe(false); expect(a.name).toBe('Safe');
+    const a = createDraft(false); expect(a.draft.mode).toBe('text'); expect(saveDraft(a)).toBe(false); expect(a.draft.title).toBe('');
   });
   it('can create an in-memory draft without exposing it to draft lists', () => {
-    const value = createDraft('Not saved', false);
+    const value = createDraft(false);
     expect(readDraft(value.id)).toBeNull();
     expect(listDrafts()).toEqual([]);
   });

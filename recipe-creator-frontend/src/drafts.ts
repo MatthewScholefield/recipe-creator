@@ -2,9 +2,11 @@ import { blank } from './recipe';
 import { recipeDraftChangeSize } from './recipe-diff';
 import type { RecipeDraft } from './types';
 
-export interface DraftSummary { id: string; name: string; updatedAt: string }
-export interface LocalDraft extends DraftSummary {
+export interface DraftSummary { id: string; title: string; updatedAt: string }
+export interface LocalDraft {
   version: 2;
+  id: string;
+  updatedAt: string;
   draft: RecipeDraft;
   publishKey: string;
   undo?: RecipeDraft;
@@ -29,9 +31,8 @@ const object = (value: unknown): value is Record<string, unknown> => !!value && 
 const text = (value: unknown): value is string => typeof value === 'string';
 const date = (value: unknown): value is string => text(value) && Number.isFinite(Date.parse(value));
 const lines = (value: unknown) => value === undefined || (object(value) && Object.values(value).every(text));
-const nameOf = (name = '') => name.trim().slice(0, 120) || 'Untitled recipe';
+const titleOf = (title = '') => title.trim().slice(0, 120) || 'Untitled recipe';
 
-// Validate the entire editable shape before a stored value reaches keyed UI blocks.
 export function isRecipeDraft(value: unknown): value is RecipeDraft {
   if (!object(value) || !['text', 'structured'].includes(String(value.mode))) return false;
   if (!['title', 'source_text', 'description', 'directions', 'notes', 'yield_unit', 'source_url', 'modifications'].every(key => text(value[key]))) return false;
@@ -51,14 +52,19 @@ export function isRecipeDraft(value: unknown): value is RecipeDraft {
   });
 }
 function valid(value: unknown): value is LocalDraft {
-  return object(value) && value.version === 2 && text(value.id) && validId(value.id) && text(value.name) &&
-    !!value.name.trim() && value.name.length <= 120 && date(value.updatedAt) && text(value.publishKey) && !!value.publishKey &&
-    isRecipeDraft(value.draft) && (value.undo === undefined || isRecipeDraft(value.undo)) && lines(value.ingredientLines);
+  return object(value) && value.version === 2 && text(value.id) && validId(value.id) && date(value.updatedAt) &&
+    text(value.publishKey) && !!value.publishKey && isRecipeDraft(value.draft) &&
+    (value.undo === undefined || isRecipeDraft(value.undo)) && lines(value.ingredientLines);
 }
 function notify() { if (typeof window !== 'undefined') window.dispatchEvent(new Event(changed)); }
 export function readDraft(id: string): LocalDraft | null {
   if (!validId(id)) return null;
-  try { const value: unknown = JSON.parse(localStorage.getItem(prefix + id) || 'null'); return valid(value) && value.id === id ? value : null; } catch { return null; }
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(prefix + id) || 'null');
+    if (!valid(value) || value.id !== id) return null;
+    const {name: _legacyName, ...current} = value as LocalDraft & {name?: unknown};
+    return current;
+  } catch { return null; }
 }
 export function listDrafts(): DraftSummary[] {
   const result: DraftSummary[] = [];
@@ -67,23 +73,19 @@ export function listDrafts(): DraftSummary[] {
       const key = localStorage.key(i);
       if (!key?.startsWith(prefix)) continue;
       const value = readDraft(key.slice(prefix.length));
-      if (value) result.push({id: value.id, name: value.name === 'Untitled recipe' ? nameOf(value.draft.title) : value.name, updatedAt: value.updatedAt});
+      if (value) result.push({id: value.id, title: titleOf(value.draft.title), updatedAt: value.updatedAt});
     }
   } catch { /* Storage may be unavailable; in-memory editing still works. */ }
   return result.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id));
 }
-export function createDraft(name?: string, persist = true): LocalDraft {
-  const value: LocalDraft = {version: 2, id: crypto.randomUUID(), name: nameOf(name), updatedAt: new Date().toISOString(), draft: blank('text'), publishKey: crypto.randomUUID()};
+export function createDraft(persist = true): LocalDraft {
+  const value: LocalDraft = {version: 2, id: crypto.randomUUID(), updatedAt: new Date().toISOString(), draft: blank('text'), publishKey: crypto.randomUUID()};
   if (persist) saveDraft(value);
   return value;
 }
 export function saveDraft(value: LocalDraft): boolean {
   if (!valid(value)) return false;
   try { localStorage.setItem(prefix + value.id, JSON.stringify(value)); notify(); return true; } catch { return false; }
-}
-export function renameDraft(id: string, name: string): boolean {
-  const value = readDraft(id);
-  return !!value && saveDraft({...value, name: nameOf(name), updatedAt: new Date().toISOString()});
 }
 export function deleteDraft(id: string): boolean {
   if (!validId(id)) return false;
@@ -127,9 +129,8 @@ export function readEditDraft(recipeId: string, current: {revision: number; draf
   return deleteLegacyDraft(recipeId) ? null : value;
 }
 function migrated(value: LegacyDraft, id: string): LocalDraft {
-  return {version: 2, id, name: nameOf(value.draft.title.trim() ? value.draft.title : 'Recovered recipe'), updatedAt: value.saved,
-    draft: value.draft, publishKey: value.key, ...(value.undo ? {undo: value.undo} : {}),
-    ...(value.ingredientLines ? {ingredientLines: value.ingredientLines} : {})};
+  return {version: 2, id, updatedAt: value.saved, draft: value.draft, publishKey: value.key,
+    ...(value.undo ? {undo: value.undo} : {}), ...(value.ingredientLines ? {ingredientLines: value.ingredientLines} : {})};
 }
 export function migrateLegacyDraft(): boolean {
   try {
