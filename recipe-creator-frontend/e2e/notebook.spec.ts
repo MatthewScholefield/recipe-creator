@@ -15,7 +15,8 @@ test('reading and bookmarks do not create an identity; legacy recipe links resol
 
 test('publishes without signup and keeps exact text when organizing fails', async ({page, context}) => {
   await page.goto('/new');
-  await page.getByRole('button', {name: 'Start a new recipe', exact: true}).click();
+  await expect(page.getByLabel('Paste or write your recipe')).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Start a new recipe', exact: true})).toHaveCount(0);
   await page.getByLabel('Recipe title').fill(`Text fallback ${crypto.randomUUID()}`);
   await page.getByLabel('Paste or write your recipe').fill(source);
   await page.getByRole('button', {name: 'Organize', exact: true}).click();

@@ -197,6 +197,10 @@ test('mobile navigation stays on one row and expands search over the header', as
   await expect(page.getByRole('option', {name: 'vegetarian', exact: true})).toBeVisible();
   await tagInput.press('Enter');
   await expect(page.locator('.active-filters').getByRole('link', {name: 'Remove vegetarian', exact: true})).toBeVisible();
+  await addRecipe.click();
+  await expect(page).toHaveURL(/\/new$/);
+  await expect(page.getByLabel('Paste or write your recipe')).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Start a new recipe', exact: true})).toHaveCount(0);
   verify();
 });
 

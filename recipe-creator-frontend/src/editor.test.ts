@@ -56,13 +56,12 @@ it('discards an in-progress edit beside the save action without recreating its d
 });
 
 
-it('opens a nonblocking draft chooser without creating an empty draft and starts in text', async () => {
-  mockApi(() => recipe); const first = localDraft(); localStorage.setItem('notebook:editor-mode', '"structured"');
+it('opens a blank text editor directly without persisting an unchanged draft', async () => {
+  mockApi(() => recipe); localDraft(); localStorage.setItem('notebook:editor-mode', '"structured"');
   const navigate = vi.fn(); const view = render(Editor,{navigate});
-  await screen.findByRole('button',{name:'Start a new recipe'}); expect(listDrafts()).toHaveLength(1);
-  expect(screen.getByRole('link',{name:'Resume Soup'})).toHaveAttribute('href',`/new?draft=${first.id}`);
-  await fireEvent.click(screen.getByRole('button',{name:'Start a new recipe'}));
   expect(await screen.findByLabelText('Paste or write your recipe')).toHaveValue('');
+  expect(screen.queryByRole('button',{name:'Start a new recipe'})).not.toBeInTheDocument();
+  expect(listDrafts()).toHaveLength(1);
   view.unmount(); expect(listDrafts()).toHaveLength(1); expect(navigate).not.toHaveBeenCalled();
 });
 it('does not substitute another draft for a missing draft URL', async () => {
@@ -191,7 +190,7 @@ it('shows the bottom name prompt after an expired-session save and keeps the dra
 });
 it('keeps an in-memory editor open if starting a draft cannot persist', async () => {
   mockApi(() => recipe); vi.spyOn(Storage.prototype,'setItem').mockImplementation(() => {throw new Error('quota');});
-  const navigate = vi.fn(); render(Editor,{navigate}); await fireEvent.click(await screen.findByRole('button',{name:'Start a new recipe'}));
+  const navigate = vi.fn(); render(Editor,{navigate});
   expect(await screen.findByLabelText('Paste or write your recipe')).toBeInTheDocument();
   expect(screen.queryByText(/Local storage is unavailable/)).not.toBeInTheDocument();
   await fireEvent.input(screen.getByLabelText('Recipe title'),{target:{value:'Soup'}});

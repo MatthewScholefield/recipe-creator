@@ -5,8 +5,8 @@
   import { appState, refreshIdentity } from './app-state.svelte';
   import { blank, ingredient, formatRecipe, applyParse, ParseGuard, move, ingredientLine, changedIngredient,
     dirtyIngredientLines, applyIngredientLines, withoutEmptyIngredients, normalizeTags, recipeDraftFromRecipe, tagError, MEAL_CLASSIFIERS } from './recipe';
-  import { createDraft, saveDraft, readDraft, listDrafts, deleteDraft, deleteLegacyDraft, draftHref, subscribeDrafts,
-    migrateLegacyDraft, readLegacyDraft, readEditDraft, recoverLegacyDraft, type LocalDraft, type LegacyDraft, type DraftSummary } from './drafts';
+  import { createDraft, saveDraft, readDraft, deleteDraft, deleteLegacyDraft, draftHref, subscribeDrafts,
+    migrateLegacyDraft, readLegacyDraft, readEditDraft, recoverLegacyDraft, type LocalDraft, type LegacyDraft } from './drafts';
   import IdentityPrompt from './IdentityPrompt.svelte';
   import AuthorPicker from './AuthorPicker.svelte';
   import TagPicker from './ui/TagPicker.svelte';
@@ -37,7 +37,7 @@
   let reviewEpoch = $state(0), completedRecipeId = $state(''), completionError = $state('');
   let activeId = $state(''), draftName = $state(''), naming = $state(false), discard = $state(false), discardChanges = $state(false);
   let sectionToDelete = $state<{id: string; label: string} | null>(null);
-  let drafts = $state<DraftSummary[]>([]), legacyAvailable = $state(false), recovered = $state<LegacyDraft | null>(null);
+  let legacyAvailable = $state(false), recovered = $state<LegacyDraft | null>(null);
   let tags = $state<string[]>([...MEAL_CLASSIFIERS]), tagsError = $state('');
   let publishKey: string = crypto.randomUUID(), baseline = '', baselineName = '', lastSaved: string | null = null, alive = true, writing = false;
   let autosaveStopped = false, saveControl = $state<HTMLButtonElement>();
@@ -77,10 +77,6 @@
     writing = false;
     persisted = ok ? 'Draft saved on this device.' : 'Local storage is unavailable. Keep this tab open or copy your recipe before leaving.';
     return ok;
-  }
-  async function startNew() {
-    if (busy) return;
-    const value = createDraft(undefined, false); resume(value); ready = true; await tick();
   }
   async function fork() {
     const snapshot = copy(draft), previous = undo ? copy(undo) : undefined, lines = copy(dirty);
@@ -142,14 +138,16 @@
         } else {
           const migrated = migrateLegacyDraft(); legacyAvailable = !migrated && !!readLegacyDraft();
           if (!migrated && !legacyAvailable) notice = 'An old draft could not be read. Its stored copy has been kept.';
-          drafts = listDrafts();
-          if (draftId) { const value = readDraft(draftId); if (value) resume(value); else error = 'This draft is missing or unreadable. Start a new recipe, or return to your drafts.'; }
+          if (draftId) {
+            const value = readDraft(draftId);
+            if (value) resume(value);
+            else error = 'This draft is missing or unreadable. Start a new recipe, or return to your drafts.';
+          } else resume(createDraft(undefined, false));
         }
-        ready = true;
+        ready = !error;
       } catch (e) { if (alive) error = message(e); }
     })();
     const unsubscribe = subscribeDrafts(() => {
-      drafts = listDrafts();
       if (activeId && !writing && JSON.stringify(readDraft(activeId)) !== lastSaved) { external = true; cancelWork(); }
     });
     const leave = (event: BeforeUnloadEvent) => {
@@ -410,15 +408,6 @@
 {#if !ready && !error}<Spinner label="Opening the editor…" />
 {:else if ready && !allowed}<p>You can read this recipe, but only its owner or an administrator can edit it. Your local draft has been kept.</p>
 {:else if ready}
-  {#if !recipeId && !editing}
-    <section aria-label="Drafts">
-      <button class="primary" onclick={startNew}><Icon name="plus" size={18} />Start a new recipe</button>
-      {#if drafts.length}<h2>Drafts</h2>
-        <ul class="draft-list">{#each drafts as item (item.id)}<li><span><strong>{item.name}</strong><small>{new Date(item.updatedAt).toLocaleString()}</small></span><Button variant="secondary" size="sm" href={draftHref(item.id)}><Icon name="edit" size={16} />Resume<span class="sr-only"> {item.name}</span></Button></li>{/each}</ul>
-      {/if}
-      {#if legacyAvailable}<p>An older draft also needs recovery. Your other drafts are unchanged.</p><button onclick={recoverOldNew}>Recover older draft as new</button>{/if}
-    </section>
-  {:else}
     {#if recovered}
       <section class="draft-recovery card draft" aria-labelledby="restore-draft-heading">
         <h2 id="restore-draft-heading">Restore draft?</h2>
@@ -438,6 +427,7 @@
         <div class="toolbar"><Button variant="primary" onclick={restoreEdit}><Icon name="edit" size={16} />Edit draft</Button><Button variant="danger" onclick={discardRecoveredDraft}><Icon name="trash" size={16} />Discard draft</Button></div>
       </section>
     {:else}
+    {#if !recipeId && legacyAvailable}<section aria-label="Draft recovery"><p>An older draft also needs recovery. Your other drafts are unchanged.</p><button onclick={recoverOldNew}>Recover older draft as new</button></section>{/if}
     {#if external}<section class="notice" role="alert"><h2>Changed in another tab</h2><p>Autosave is paused. Keep your copy as a new draft, or reload the stored version.</p><button onclick={reloadLocal}>Reload draft</button><button onclick={fork}>Save as new draft</button></section>{/if}
     {#if activeId}<div class="toolbar draft-actions"><span class="draft-badge">Draft · {draftName}</span><button type="button" class="ghost" disabled={busy || external} onclick={() => naming = !naming}><Icon name="edit" size={16} />Rename</button><button type="button" class="ghost" disabled={busy} onclick={() => discard = !discard}><Icon name="trash" size={16} />Discard</button><Button variant="ghost" size="sm" href="/new"><Icon name="plus" size={16} />Start another recipe</Button></div>
       {#if naming}<label>Draft name<input maxlength="120" bind:value={draftName} disabled={busy || external}></label><button onclick={() => { draftName = draftName.trim() || 'Untitled recipe'; flush(); naming = false; }}>Done</button>{/if}
@@ -509,11 +499,10 @@
       <div class="toolbar dialog-actions"><Button variant="ghost" onclick={() => sectionToDelete = null}>Cancel</Button><Button variant="danger" onclick={confirmSectionDelete}>Delete section</Button></div>
     </Modal>
     {/if}
-  {/if}
 {/if}
 {/if}
 <style>
-  .line-row{display:flex;align-items:center;gap:.25rem;margin:.4rem 0}.line-row label{flex:1;margin:0;min-width:0}.line-row input{width:100%}.ghost{display:inline-flex;align-items:center;gap:.3rem;background:transparent;border-color:transparent;padding:.35rem .5rem;font-size:.9rem}.ghost:hover:not(:disabled){background:var(--ui-surface-muted);border-color:var(--ui-control-border);color:var(--ui-accent-strong)}.ghost:focus-visible,form button:focus-visible{outline:3px solid var(--ui-accent);outline-offset:3px}.toolbar{flex-wrap:wrap}.dialog-actions{justify-content:flex-end;margin-bottom:0}.draft-actions{margin-bottom:1rem}.draft-badge{font-size:.85rem;color:var(--muted)}.draft-recovery{border-style:dashed;max-width:32rem}.draft-recovery h2{margin-top:0}.draft-recovery-description{margin:.25rem 0;color:var(--muted);font-weight:600}.draft-list{list-style:none;padding:0}.draft-list li{display:flex;justify-content:space-between;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--border)}.draft-list small{display:block}.submit-wrapper{display:inline-flex}.submit-wrapper:focus-visible{outline:2px solid currentColor;outline-offset:4px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  .line-row{display:flex;align-items:center;gap:.25rem;margin:.4rem 0}.line-row label{flex:1;margin:0;min-width:0}.line-row input{width:100%}.ghost{display:inline-flex;align-items:center;gap:.3rem;background:transparent;border-color:transparent;padding:.35rem .5rem;font-size:.9rem}.ghost:hover:not(:disabled){background:var(--ui-surface-muted);border-color:var(--ui-control-border);color:var(--ui-accent-strong)}.ghost:focus-visible,form button:focus-visible{outline:3px solid var(--ui-accent);outline-offset:3px}.toolbar{flex-wrap:wrap}.dialog-actions{justify-content:flex-end;margin-bottom:0}.draft-actions{margin-bottom:1rem}.draft-badge{font-size:.85rem;color:var(--muted)}.draft-recovery{border-style:dashed;max-width:32rem}.draft-recovery h2{margin-top:0}.draft-recovery-description{margin:.25rem 0;color:var(--muted);font-weight:600}.submit-wrapper{display:inline-flex}.submit-wrapper:focus-visible{outline:2px solid currentColor;outline-offset:4px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
   .draft-diff{margin:1rem 0;padding-top:.75rem;border-top:1px solid var(--line)}.draft-diff h3,.draft-diff h4{margin:.25rem 0}.draft-diff h4{font-size:.95rem}.draft-diff-fields{display:grid;gap:.75rem}.save-actions{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
   .editor-fields{transition:opacity .15s ease}.editor-fields:disabled{opacity:.72}
   form input:not([type=checkbox]),form textarea{font-weight:400}

@@ -9,8 +9,8 @@ import Profile from './Profile.svelte';
 import Admin from './Admin.svelte';
 import { blank, ingredient } from './recipe';
 import { listDrafts, readDraft } from './drafts';
-async function startNewRecipe() {
-  await fireEvent.click(await screen.findByRole('button',{name:'Start a new recipe'}));
+async function awaitBlankEditor() {
+  await screen.findByLabelText('Paste or write your recipe');
 }
 const identity = {user:{id:'u1',display_name:'Cook',state:'active',photo_trusted:false},device_id:'d1',admin:false,csrf_token:'csrf'};
 function mockApi(handler: (url: string, init?: RequestInit) => unknown | Promise<unknown>) {const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {const body = String(url) === '/api/tags' ? {tags:[]} : await handler(String(url),init); return body instanceof Response ? body : new Response(JSON.stringify(body));}); vi.stubGlobal('fetch',fetcher); return fetcher;}
@@ -29,7 +29,7 @@ it('uses device wrappers and requests server-owned summaries for My recipes', as
 it('does not navigate after a publishing editor is unmounted', async () => {
   let finish!: (value: unknown) => void;
   const fetcher = mockApi(url => url === '/api/session' ? identity : url === '/api/recipes' ? new Promise(resolve => finish = resolve) : {});
-  const navigate = vi.fn(); const view = render(Editor,{navigate}); await startNewRecipe();
+  const navigate = vi.fn(); const view = render(Editor,{navigate}); await awaitBlankEditor();
   await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Soup'}});
   await waitFor(() => expect(listDrafts()[0]).toBeDefined());
   const [local] = listDrafts(); expect(local).toBeDefined();
@@ -69,7 +69,7 @@ it('discards a recovered edit without leaving the form disabled', async () => {
 });
 it('keeps text publishable during a parser outage', async () => {
   const fetcher = mockApi(url => url === '/api/session' ? identity : url === '/api/parse' ? new Response(JSON.stringify({detail:'AI unavailable'}),{status:503}) : {...recipe,id:'saved'});
-  const navigate = vi.fn(); render(Editor,{navigate}); await startNewRecipe(); await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Dinner'}}); await fireEvent.input(screen.getByLabelText('Paste or write your recipe'),{target:{value:'Original recipe'}}); await fireEvent.click(screen.getByRole('button',{name:'Organize'})); expect(await screen.findByRole('alert')).toHaveTextContent('Your text is safe'); expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue('Original recipe'); expect(screen.getByRole('button',{name:'Publish recipe'})).toBeEnabled();
+  const navigate = vi.fn(); render(Editor,{navigate}); await awaitBlankEditor(); await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Dinner'}}); await fireEvent.input(screen.getByLabelText('Paste or write your recipe'),{target:{value:'Original recipe'}}); await fireEvent.click(screen.getByRole('button',{name:'Organize'})); expect(await screen.findByRole('alert')).toHaveTextContent('Your text is safe'); expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue('Original recipe'); expect(screen.getByRole('button',{name:'Publish recipe'})).toBeEnabled();
   await fireEvent.click(screen.getByRole('button',{name:'Publish recipe'}));
   await waitFor(() => expect(navigate).toHaveBeenCalledWith('/recipes/saved'));
   const write = fetcher.mock.calls.find(([url]) => url === '/api/recipes');
@@ -97,7 +97,7 @@ it('browses summaries without a reactive request loop or identity creation', asy
 it('ignores a stale parse after typing and allows a text-only publish', async () => {
   let resolveParse!: (value: unknown) => void;
   const fetcher = mockApi(url => url === '/api/session' ? identity : url === '/api/parse' ? new Promise(resolve => resolveParse = resolve) : {...recipe,id:'saved'});
-  const navigate = vi.fn(); render(Editor,{navigate}); await startNewRecipe();
+  const navigate = vi.fn(); render(Editor,{navigate}); await awaitBlankEditor();
   await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Soup'}}); await fireEvent.input(screen.getByLabelText('Paste or write your recipe'),{target:{value:'Original'}});
   await fireEvent.click(screen.getByRole('button',{name:'Organize'})); await waitFor(() => expect(resolveParse).toBeTypeOf('function'));
   await fireEvent.input(screen.getByLabelText('Paste or write your recipe'),{target:{value:'Changed while parsing'}});
@@ -109,7 +109,7 @@ it('ignores a stale parse after typing and allows a text-only publish', async ()
 it('cancels parsing without losing source text', async () => {
   let signal: AbortSignal | undefined;
   mockApi((url,init) => url === '/api/session' ? identity : new Promise((_resolve,reject) => {signal = init?.signal as AbortSignal; signal?.addEventListener('abort',() => reject(new DOMException('Cancelled','AbortError')));}));
-  render(Editor,{navigate:vi.fn()}); await startNewRecipe(); await fireEvent.input(await screen.findByLabelText('Paste or write your recipe'),{target:{value:'Keep every word'}}); await fireEvent.click(screen.getByRole('button',{name:'Organize'})); await waitFor(() => expect(signal).toBeDefined()); await fireEvent.click(screen.getByRole('button',{name:'Cancel organizing'})); expect(signal?.aborted).toBe(true); expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue('Keep every word');
+  render(Editor,{navigate:vi.fn()}); await awaitBlankEditor(); await fireEvent.input(await screen.findByLabelText('Paste or write your recipe'),{target:{value:'Keep every word'}}); await fireEvent.click(screen.getByRole('button',{name:'Organize'})); await waitFor(() => expect(signal).toBeDefined()); await fireEvent.click(screen.getByRole('button',{name:'Cancel organizing'})); expect(signal?.aborted).toBe(true); expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue('Keep every word');
 });
 it('opens an in-editor comparison and preserves the true base with the draft', async () => {
   mockApi((url,init) => url === '/api/session' ? identity : init?.method === 'PUT' ? new Response(JSON.stringify({detail:'Newer revision exists'}),{status:409}) : recipe);
