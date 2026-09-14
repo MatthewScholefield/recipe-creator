@@ -14,7 +14,7 @@ from surreal_orm import SurrealDBConnectionManager as Connections
 from surreal_orm.migrations import Migration
 from surreal_orm.migrations.operations import CreateTable, RawSQL
 
-from recipe_creator.models import GramConversion, MODELS, Recipe, SiteSettings
+from recipe_creator.models import GramConversion, MODELS, Recipe, SiteSettings, utcnow
 from recipe_creator.repository import ConflictError, NotFoundError, Repository, _MigrationExecutor
 from recipe_creator.settings import Settings
 
@@ -23,6 +23,7 @@ def test_model_registry_and_nested_validation():
     assert set(MODELS) == {
         "users", "devices", "pairings", "admin_sessions", "recipes", "revisions",
         "photos", "jobs", "gram_conversions", "audit", "usage", "site_settings",
+        "viewers", "viewer_credentials", "recipe_viewers", "recipe_view_stats", "view_ip_windows",
     }
     assert SiteSettings(copy={"site_title": "Recipes"}).model_dump()["copy"] == {"site_title": "Recipes"}
     with pytest.raises(ValidationError):
@@ -75,9 +76,18 @@ async def test_nested_roundtrip_schema_and_references(repo):
 
 @pytest.mark.integration
 async def test_all_tables_and_dedupe(repo):
+    timestamp = utcnow()
+    recipe = await repo.create("recipes", {})
+    special = {
+        "viewer_credentials": {"viewer_id": "viewer", "expires_at": timestamp},
+        "recipe_viewers": {"recipe_id": recipe["id"], "viewer_id": "viewer", "first_view_at": timestamp,
+                           "last_counted_at": timestamp, "first_category": "anonymous"},
+        "recipe_view_stats": {"recipe_id": recipe["id"]},
+        "view_ip_windows": {"entries": [], "expires_at": timestamp},
+    }
     for table in MODELS:
         from recipe_creator.schemas import DEFAULT_SITE_COPY
-        data = {'copy': DEFAULT_SITE_COPY} if table == 'site_settings' else {}
+        data = {'copy': DEFAULT_SITE_COPY} if table == 'site_settings' else special.get(table, {})
         row = await repo.create(table, {**data, "service_nested": {"null": None, "values": [None, {"ok": True}]}})
         assert (await repo.get(table, row["id"]))["service_nested"] == {"null": None, "values": [None, {"ok": True}]}
         if table == 'site_settings':
@@ -181,13 +191,14 @@ async def test_security_cutover_from_existing_database(repo):
                 await executor.migrate(target='0001_initial', schema_only=False)
             await old._connection.query("CREATE users:legacy CONTENT {display_name: 'Legacy', state: 'active', photo_trust: true, created_at: time::now(), updated_at: time::now(), payload: {is_admin: true}};")
             await old._connection.query("CREATE admin_sessions:legacy CONTENT {secret_hash: 'historical', expires_at: time::now() + 1d, created_at: time::now(), updated_at: time::now(), payload: {}};")
-            recipe = await old.create('recipes', {'title': 'Original', 'source_text': ' Exact\\r\\nprose ', 'tags': ['Dinner', 'Breakfast', 'Cafe\u0301'], 'owner_id': 'legacy'})
+            recipe = await old.create('recipes', {'title': 'Original', 'source_text': ' Exact\r\nprose ', 'tags': ['Dinner', 'Breakfast', 'Café']}, id='legacy_recipe')
+            await old._connection.query("UPDATE recipes:legacy_recipe SET owner_id = users:legacy;")
             before = await old.get('recipes', recipe['id'])
             assert await old.migrate() == [
-                '0002_user_admin_site_settings', '0003_gram_conversion_cache',
+                '0002_user_admin_site_settings', '0003_gram_conversion_cache', '0004_recipe_views',
             ]
             user = await old.get('users', 'legacy')
-            assert user['is_admin'] is False and user['photo_trust'] is True
+            assert user['is_admin'] is False and user['trusted'] is True and 'photo_trust' not in user
             assert (await old.get('admin_sessions', 'legacy'))['revoked_at']
             assert await old.get('recipes', recipe['id']) == before
             assert not await old.list('site_settings')

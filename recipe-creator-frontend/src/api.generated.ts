@@ -229,6 +229,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recipes/{recipe_id}/views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Recipe View */
+        post: operations["create_recipe_view_api_recipes__recipe_id__views_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ingredients/parse": {
         parameters: {
             query?: never;
@@ -616,8 +633,8 @@ export interface components {
             display_name: string;
             /** State */
             state: string;
-            /** Photo Trusted */
-            photo_trusted: boolean;
+            /** Trusted */
+            trusted: boolean;
             /** Merged Into */
             merged_into?: string | null;
             /** Last Login At */
@@ -890,8 +907,8 @@ export interface components {
             display_name: string;
             /** State */
             state: string;
-            /** Photo Trusted */
-            photo_trusted: boolean;
+            /** Trusted */
+            trusted: boolean;
             /** Merged Into */
             merged_into?: string | null;
         };
@@ -940,6 +957,16 @@ export interface components {
             source_url: string;
             /** Modifications */
             modifications: string;
+            /**
+             * Total Views
+             * @default 0
+             */
+            total_views: number;
+            /**
+             * Unique Viewers
+             * @default 0
+             */
+            unique_viewers: number;
         };
         /** RecipeDraft */
         RecipeDraft: {
@@ -1009,6 +1036,8 @@ export interface components {
             errors: string[];
             /** Groups */
             groups: components["schemas"]["RecipeSummaryGroup"][];
+            /** Popular */
+            popular?: components["schemas"]["RecipeSummary"][];
         };
         /** RecipeLookupRequest */
         RecipeLookupRequest: {
@@ -1045,6 +1074,16 @@ export interface components {
             owner_id: string | null;
             /** Author Name */
             author_name: string | null;
+            /**
+             * Total Views
+             * @default 0
+             */
+            total_views: number;
+            /**
+             * Unique Viewers
+             * @default 0
+             */
+            unique_viewers: number;
         };
         /** RecipeSummaryGroup */
         RecipeSummaryGroup: {
@@ -1107,6 +1146,19 @@ export interface components {
             /** Expected Revision */
             expected_revision: number;
         };
+        /** RecipeViewCounts */
+        RecipeViewCounts: {
+            /**
+             * Total Views
+             * @default 0
+             */
+            total_views: number;
+            /**
+             * Unique Viewers
+             * @default 0
+             */
+            unique_viewers: number;
+        };
         /** RestoreInput */
         RestoreInput: {
             /** Revision Id */
@@ -1158,8 +1210,8 @@ export interface components {
         };
         /** UserInput */
         UserInput: {
-            /** Photo Trusted */
-            photo_trusted?: boolean | null;
+            /** Trusted */
+            trusted?: boolean | null;
             /** State */
             state?: ("active" | "blocked") | null;
         };
@@ -1680,6 +1732,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_recipe_view_api_recipes__recipe_id__views_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipe_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeViewCounts"];
+                };
             };
             /** @description Validation Error */
             422: {

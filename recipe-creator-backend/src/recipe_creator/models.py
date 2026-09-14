@@ -4,7 +4,7 @@ References explicitly REJECT deletion. Soft-delete/merge identities instead of
 cascading away authored content or immutable historical attribution.
 """
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from surreal_orm import BaseSurrealModel, SurrealConfigDict
@@ -51,9 +51,61 @@ class User(DomainModel):
     model_config = SurrealConfigDict(table_name="users")
     display_name: str = "Anonymous"
     state: str = "active"
-    photo_trust: bool = False
+    trusted: bool = False
+    viewer_id: str | None = None
     is_admin: bool = False
     merged_into: ForeignKey("User", on_delete="PROTECT") = None
+
+
+class Viewer(DomainModel):
+    model_config = SurrealConfigDict(table_name="viewers")
+    user_id: str | None = None
+    merged_into: str | None = None
+    revision: int = Field(default=1, ge=1)
+
+
+class ViewerCredential(DomainModel):
+    model_config = SurrealConfigDict(table_name="viewer_credentials")
+    viewer_id: str = ""
+    expires_at: datetime = Field(default_factory=utcnow)
+    revision: int = Field(default=1, ge=1)
+
+
+class RecipeViewer(DomainModel):
+    model_config = SurrealConfigDict(table_name="recipe_viewers")
+    recipe_id: ForeignKey("Recipe", on_delete="PROTECT") = None
+    viewer_id: str = ""
+    first_view_at: datetime = Field(default_factory=utcnow)
+    last_counted_at: datetime = Field(default_factory=utcnow)
+    first_category: Literal["trusted", "named", "anonymous"] = "anonymous"
+    revision: int = Field(default=1, ge=1)
+
+
+class RecipeViewStats(DomainModel):
+    model_config = SurrealConfigDict(table_name="recipe_view_stats")
+    recipe_id: ForeignKey("Recipe", on_delete="PROTECT") = None
+    total_views: int = Field(default=0, ge=0)
+    unique_viewers: int = Field(default=0, ge=0)
+    trusted_views: int = Field(default=0, ge=0)
+    named_views: int = Field(default=0, ge=0)
+    anonymous_views: int = Field(default=0, ge=0)
+    trusted_unique_viewers: int = Field(default=0, ge=0)
+    named_unique_viewers: int = Field(default=0, ge=0)
+    anonymous_unique_viewers: int = Field(default=0, ge=0)
+    revision: int = Field(default=1, ge=1)
+
+
+class ViewIPEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    viewer_id: str
+    last_counted_at: datetime
+
+
+class ViewIPWindow(DomainModel):
+    model_config = SurrealConfigDict(table_name="view_ip_windows")
+    entries: list[ViewIPEntry] = Field(default_factory=list, max_length=10)
+    expires_at: datetime = Field(default_factory=utcnow)
+    revision: int = Field(default=1, ge=1)
 
 
 class DeviceCredential(DomainModel):
@@ -182,6 +234,7 @@ class SiteSettings(DomainModel):
 
 
 MODELS = {model.get_table_name(): model for model in (
-    User, DeviceCredential, PairingSession, AdminSession, Recipe,
-    RecipeRevision, Photo, EnrichmentJob, GramConversion, AuditEvent, UsageBucket, SiteSettings,
+    User, Viewer, ViewerCredential, RecipeViewer, RecipeViewStats, ViewIPWindow,
+    DeviceCredential, PairingSession, AdminSession, Recipe, RecipeRevision, Photo,
+    EnrichmentJob, GramConversion, AuditEvent, UsageBucket, SiteSettings,
 )}

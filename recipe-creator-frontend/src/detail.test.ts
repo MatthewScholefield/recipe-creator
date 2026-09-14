@@ -4,12 +4,13 @@ import Detail from './Detail.svelte';
 import { blank, ingredient } from './recipe';
 import type { Recipe } from './types';
 
-const identity = {user:{id:'u1',display_name:'Cook',state:'active',photo_trusted:false},device_id:'d1',admin:false,csrf_token:'csrf'};
-const recipe: Recipe = {...blank('structured'),id:'r1',title:'Soup',revision:2,owner_id:'u1',author_name:'Cook',can_edit:true,enrichment_status:'complete',directions:'Simmer.',ingredient_groups:[{id:'g1',name:'Ingredients',ingredients:[{...ingredient(),id:'i1',name:'flour',quantity:'1',unit:'cup',original_text:'1 cup flour',grams:{amount:120,low:null,high:null,estimated:false,basis:'flour'}}]}]};
+const identity = {user:{id:'u1',display_name:'Cook',state:'active',trusted:false},device_id:'d1',admin:false,csrf_token:'csrf'};
+const recipe: Recipe = {...blank('structured'),id:'r1',title:'Soup',revision:2,owner_id:'u1',author_name:'Cook',can_edit:true,enrichment_status:'complete',total_views:0,unique_viewers:0,directions:'Simmer.',ingredient_groups:[{id:'g1',name:'Ingredients',ingredients:[{...ingredient(),id:'i1',name:'flour',quantity:'1',unit:'cup',original_text:'1 cup flour',grams:{amount:120,low:null,high:null,estimated:false,basis:'flour'}}]}]};
 
 function mockApi(value = recipe) { const fetcher = vi.fn(async (url: string | URL, init?: RequestInit) => {
   const path = String(url);
   if (path === '/api/recipes/r1') return new Response(JSON.stringify(value));
+  if (path === '/api/recipes/r1/views') return new Response(JSON.stringify({total_views:value.total_views,unique_viewers:value.unique_viewers}));
   if (path === '/api/session') return new Response(JSON.stringify(identity));
   if (path === '/api/photos?recipe_id=r1' || path === '/api/photos?mine=true') return new Response(JSON.stringify({items:[]}));
   if (init?.method === 'DELETE') return new Response(null, {status:204});
@@ -90,23 +91,21 @@ it('keeps detail, fallback, scaling, and authored text consistent', async () => 
     }],
   };
   mockApi(quantities);
-  render(Detail,{recipeId:'r1',navigate:vi.fn()});
+  const view = render(Detail,{recipeId:'r1',navigate:vi.fn()});
   await screen.findByRole('heading',{name:'Soup'});
-  expect(screen.getByText('½ cup flour')).toBeInTheDocument();
-  expect(screen.getByText('0.6 cup sugar')).toBeInTheDocument();
-  expect(screen.getByText('⅓ tsp salt')).toBeInTheDocument();
-  expect(screen.getByText('0.5 g yeast')).toBeInTheDocument();
-  expect(screen.getByText('¼–¾ tablespoons oil')).toBeInTheDocument();
-  expect(screen.getByText('0.6 cup starch')).toBeInTheDocument();
+  for (const text of ['½ cup flour', '0.6 cup sugar', '⅓ tsp salt', '0.5 g yeast',
+                      '¼–¾ tablespoons oil', '0.6 cup starch']) {
+    expect(view.container).toHaveTextContent(text);
+  }
 
   await fireEvent.click(screen.getByRole('button',{name:'Adjust ingredient scale'}));
   await fireEvent.click(screen.getByRole('tab',{name:'Custom'}));
   await fireEvent.input(screen.getByLabelText('Custom multiplier'),{target:{value:'3'}});
-  expect(screen.getByText('1 ½ cup flour')).toBeInTheDocument();
-  expect(screen.getByText('1.8 cup sugar')).toBeInTheDocument();
-  expect(screen.getByText('1 tsp salt')).toBeInTheDocument();
-  expect(screen.getByText('1.5 g yeast')).toBeInTheDocument();
-  expect(screen.getByText('¾–2 ¼ tablespoons oil')).toBeInTheDocument();
+  expect(view.container).toHaveTextContent('1 ½ cup flour');
+  expect(view.container).toHaveTextContent('1.8 cup sugar');
+  expect(view.container).toHaveTextContent('1 tsp salt');
+  expect(view.container).toHaveTextContent('1.5 g yeast');
+  expect(view.container).toHaveTextContent('¾–2 ¼ tablespoons oil');
 
   await fireEvent.click(screen.getByRole('tab',{name:'Grams'}));
   const weight = screen.getByText('180 g');
@@ -161,4 +160,70 @@ it('renders photos directly at the bottom instead of behind a photos toggle', as
   mockApi(); render(Detail,{recipeId:'r1',navigate:vi.fn()}); await screen.findByRole('heading',{name:'Soup'});
   expect(screen.getByRole('heading',{name:'Photos'})).toBeInTheDocument();
   expect(screen.queryByRole('button',{name:/view photos/i})).not.toBeInTheDocument();
+});
+
+it('registers a visible detail once and exposes exact clickable statistics', async () => {
+  const counted = {...recipe, total_views:1234, unique_viewers:567};
+  const fetcher = mockApi(counted);
+  render(Detail,{recipeId:'r1',navigate:vi.fn()});
+  const statistics = await screen.findByRole('button',{name:'View statistics: 1234 total views, 567 unique viewers'});
+  await waitFor(() => expect(fetcher.mock.calls.filter(([url]) => String(url) === '/api/recipes/r1/views')).toHaveLength(1));
+  expect(statistics).toHaveTextContent('1.2K views');
+  await fireEvent.click(statistics);
+  expect(screen.getByRole('tooltip').textContent).toBe('Total views: 1,234\nUnique viewers: 567');
+  expect(statistics).toHaveAttribute('aria-expanded','true');
+  await fireEvent.click(statistics);
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  expect(statistics).toHaveAttribute('aria-expanded','false');
+  await fireEvent.focusOut(statistics,{relatedTarget:document.body});
+  statistics.focus();
+  await fireEvent.focusIn(statistics);
+  expect(screen.getByRole('tooltip')).toBeInTheDocument();
+  await fireEvent.keyDown(document,{key:'Escape'});
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  expect(statistics).toHaveFocus();
+  await fireEvent.click(statistics);
+  expect(screen.getByRole('tooltip')).toBeInTheDocument();
+  await fireEvent.pointerDown(document.body);
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  await fireEvent.click(statistics);
+  expect(screen.getByRole('tooltip')).toBeInTheDocument();
+  await fireEvent.click(statistics);
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+});
+
+it('waits for a hidden detail to become visible before registering', async () => {
+  let visibility: DocumentVisibilityState = 'hidden';
+  vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+  const fetcher = mockApi();
+  const view = render(Detail,{recipeId:'r1',navigate:vi.fn()});
+  await screen.findByRole('heading',{name:'Soup'});
+  expect(fetcher.mock.calls.some(([url]) => String(url) === '/api/recipes/r1/views')).toBe(false);
+  visibility = 'visible';
+  document.dispatchEvent(new Event('visibilitychange'));
+  await waitFor(() => expect(fetcher.mock.calls.filter(([url]) => String(url) === '/api/recipes/r1/views')).toHaveLength(1));
+  view.unmount();
+  document.dispatchEvent(new Event('visibilitychange'));
+  expect(fetcher.mock.calls.filter(([url]) => String(url) === '/api/recipes/r1/views')).toHaveLength(1);
+});
+
+it('does not update or log when unmounted before registration completes', async () => {
+  const pending = (Promise as PromiseConstructor & {withResolvers<T>(): {promise: Promise<T>; resolve(value: T): void; reject(reason?: unknown): void}}).withResolvers<Response>();
+  const logged = vi.spyOn(console,'error').mockImplementation(() => {});
+  const fetcher = vi.fn(async (url: string | URL) => {
+    const path = String(url);
+    if (path === '/api/recipes/r1') return new Response(JSON.stringify(recipe));
+    if (path === '/api/session') return new Response(JSON.stringify(identity));
+    if (path === '/api/recipes/r1/views') return pending.promise;
+    return new Response(JSON.stringify({items:[]}));
+  });
+  vi.stubGlobal('fetch',fetcher);
+  const component = render(Detail,{recipeId:'r1',navigate:vi.fn()});
+  await screen.findByRole('heading',{name:'Soup'});
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url) === '/api/recipes/r1/views')).toBe(true));
+  component.unmount();
+  pending.resolve(new Response(JSON.stringify({total_views:99,unique_viewers:99})));
+  await pending.promise;
+  await Promise.resolve();
+  expect(logged).not.toHaveBeenCalled();
 });

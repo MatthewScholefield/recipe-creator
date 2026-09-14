@@ -12,7 +12,7 @@ import { listDrafts, readDraft } from './drafts';
 async function awaitBlankEditor() {
   await screen.findByLabelText('Paste or write your recipe');
 }
-const identity = {user:{id:'u1',display_name:'Cook',state:'active',photo_trusted:false},device_id:'d1',admin:false,csrf_token:'csrf'};
+const identity = {user:{id:'u1',display_name:'Cook',state:'active',trusted:false},device_id:'d1',admin:false,csrf_token:'csrf'};
 function mockApi(handler: (url: string, init?: RequestInit) => unknown | Promise<unknown>) {const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {const body = String(url) === '/api/tags' ? {tags:[]} : await handler(String(url),init); return body instanceof Response ? body : new Response(JSON.stringify(body));}); vi.stubGlobal('fetch',fetcher); return fetcher;}
 const recipe = {...blank('structured'),id:'r1',title:'Soup',revision:2,owner_id:'u1',author_name:'Cook',can_edit:true,directions:'Simmer 20 minutes at 180°C.',ingredient_groups:[{id:'g1',name:'',ingredients:[{...ingredient(),id:'i1',name:'stock',quantity:'1/2',unit:'cup',original_text:'½ cup stock'}]}]};
 it('uses the actual admin photo wrapper, raw status, and moderation route', async () => {

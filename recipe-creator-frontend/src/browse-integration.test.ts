@@ -1,10 +1,10 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import Browse from './Browse.svelte';
 import { appState, DEFAULT_SITE_COPY, setSiteCopy } from './app-state.svelte';
 import { createDraft, draftHref, saveDraft } from './drafts';
 
-const summary = (id: string, tags: string[] = []) => ({id, title: `Recipe ${id}`, tags, description: '', thumbnail_photo_id: null});
+const summary = (id: string, tags: string[] = [], total_views = 0) => ({id, title: `Recipe ${id}`, tags, description: '', thumbnail_photo_id: null, owner_id:null, author_name:null, total_views, unique_viewers:0});
 type Lookup = {ids: string[]; q?: string; tags: string[]};
 function mockApi(handler: (url: URL, init?: RequestInit) => unknown | Promise<unknown>) {
   const fetcher = vi.fn(async (input: string, init?: RequestInit) => {
@@ -87,7 +87,7 @@ it('applies repeated tags and text before pagination and resets offset when refi
   const urls: URL[] = [];
   mockApi(url => {
     urls.push(url);
-    return {items: [summary(`page-${url.searchParams.get('offset')}-${url.searchParams.get('q')}`)], has_more: url.searchParams.get('offset') === '0'};
+    return {items: [summary(`page-${url.searchParams.get('offset')}-${url.searchParams.get('q')}`)], offset: Number(url.searchParams.get('offset')), popular: [], errors: [], has_more: url.searchParams.get('offset') === '0'};
   });
   const component = render(Browse, {query: 'soup', selectedTags: ['dinner', 'vegetarian']});
   await fireEvent.click(await screen.findByRole('button', {name: 'Load more recipes'}));
@@ -98,4 +98,36 @@ it('applies repeated tags and text before pagination and resets offset when refi
   await screen.findByRole('link', {name: 'Recipe page-0-broth'});
   expect(screen.queryByRole('link', {name: 'Recipe page-1-soup'})).not.toBeInTheDocument();
   expect(urls.at(-1)?.searchParams.getAll('tag')).toEqual(['dinner']);
+});
+
+it('renders Popular only at home and keeps live pagination offsets despite duplicates', async () => {
+  const urls: URL[] = [];
+  mockApi(url => {
+    urls.push(url);
+    const offset = Number(url.searchParams.get('offset'));
+    if (url.searchParams.get('q')) return {items:[summary('search')],offset:0,popular:[],errors:[],has_more:false};
+    if (offset === 0) return {
+      items:[summary('a',['dinner'],5),summary('b',['dinner'],1)],
+      popular:[summary('popular-1'),summary('popular-2'),summary('popular-3')],
+      offset:0,errors:[],has_more:true,
+    };
+    if (offset === 2) return {
+      items:[summary('a',['dinner'],0),summary('c',['dinner'],10)],
+      popular:[],offset:2,errors:[],has_more:true,
+    };
+    return {items:[summary('d',['dinner'],3)],popular:[],offset:4,errors:[],has_more:false};
+  });
+  const component = render(Browse,{query:''});
+  expect(await screen.findByRole('heading',{name:'Popular'})).toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Load more recipes'}));
+  await screen.findByRole('link',{name:'Recipe c'});
+  expect(screen.getAllByRole('link',{name:'Recipe a'})).toHaveLength(1);
+  const dinner = screen.getByRole('heading',{name:'dinner'}).closest('section')!;
+  expect(within(dinner).getAllByRole('link').map(link => link.textContent)).toEqual(['Recipe c','Recipe b','Recipe a']);
+  await fireEvent.click(screen.getByRole('button',{name:'Load more recipes'}));
+  await screen.findByRole('link',{name:'Recipe d'});
+  expect(urls.filter(url => url.pathname === '/api/recipes').map(url => url.searchParams.get('offset'))).toEqual(['0','2','4']);
+  await component.rerender({query:'soup'});
+  await screen.findByRole('link',{name:'Recipe search'});
+  expect(screen.queryByRole('heading',{name:'Popular'})).not.toBeInTheDocument();
 });

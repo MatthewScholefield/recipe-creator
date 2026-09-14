@@ -43,7 +43,7 @@
 {#if identity && !identity.admin}<p class="notice">Your current profile does not have admin access.</p><Button variant="secondary" size="sm" href="/profile"><Icon name="user" size={16} />Go to profile</Button>
 {:else if identity?.admin}<nav class="toolbar" aria-label="Admin sections">{#each ['photos','users','copy','merge','audit'] as item}<button aria-pressed={tab === item} disabled={busy} onclick={() => void action(() => loadTab(item))}>{item === 'copy' ? 'Site text' : item}</button>{/each}</nav>
 {#if tab === 'photos'}<h2>Photo moderation</h2>
-<p>Approve each pending photo individually. Trust applies only to future contributions.</p>
+<p>Approve each pending photo individually. Trust affects future photo approvals and view classification.</p>
 <div class="photo-grid">{#each photos as photo}<figure>
 <a href={photoUrl(photo.id)} target="_blank" rel="noopener" aria-label="Open full-size photo">
 <!-- svelte-ignore a11y_img_redundant_alt -- exact product copy distinguishes moderation thumbnails -->
@@ -53,7 +53,7 @@
 <PhotoDate createdAt={photo.created_at} />
 {#if photo.caption}<p class="prose">{photo.caption}</p>{/if}
 <div class="photo-actions"><Button variant="ghost" size="sm" href={`/recipes/${id(photo.recipe_id)}`}><Icon name="arrow-right" size={16} />View recipe</Button>
-<div class="toolbar">{#each ['approved','rejected','pending'] as const as state}<button disabled={busy || photo.status === state} onclick={() => void action(() => moderate(photo, state))}>{state === 'approved' ? 'Approve' : state === 'rejected' ? 'Reject' : 'Return to pending'}</button>{/each}</div>{#if photo.uploader_id}<button disabled={busy} onclick={() => {if (confirm('Trust this contributor for future photos? Existing pending photos will still need approval.')) void action(async () => {await mutate(`/admin/users/${id(photo.uploader_id!)}`, {photo_trusted: true}, 'PATCH'); notice = 'Contributor trusted for future photos only.';});}}>Trust future photos</button>{/if}</div></figcaption>
+<div class="toolbar">{#each ['approved','rejected','pending'] as const as state}<button disabled={busy || photo.status === state} onclick={() => void action(() => moderate(photo, state))}>{state === 'approved' ? 'Approve' : state === 'rejected' ? 'Reject' : 'Return to pending'}</button>{/each}</div>{#if photo.uploader_id}<button disabled={busy} onclick={() => {if (confirm('Trust this user? Future photos can be approved automatically and future views will be classified as trusted. Existing pending photos still need approval.')) void action(async () => {await mutate(`/admin/users/${id(photo.uploader_id!)}`, {trusted: true}, 'PATCH'); notice = 'User trusted for future photos and views.';});}}>Trust user</button>{/if}</div></figcaption>
 </figure>{/each}</div>{#if !busy && !photos.length}<p>No photos to review.</p>{/if}
 {:else if tab === 'users'}<h2>Profiles</h2>
 <form class="toolbar" onsubmit={(event) => {event.preventDefault(); void action(() => loadTab('users'));}}>
@@ -63,9 +63,9 @@
 </form>{#each users as user}<section class="notice">
 <h3>{user.display_name}</h3>
 <p>
-<code>{user.id}</code> · {user.state} · {user.photo_trusted ? 'trusted photos' : 'approval required'}</p>
+<code>{user.id}</code> · {user.state} · {user.trusted ? 'Trusted user' : 'Untrusted user'}</p>
 <div class="toolbar">
-<button disabled={busy} onclick={() => void action(() => updateUser(user, {photo_trusted: !user.photo_trusted}))}>{user.photo_trusted ? 'Revoke photo trust' : 'Trust future photos'}</button>
+<button disabled={busy} onclick={() => void action(() => updateUser(user, {trusted: !user.trusted}))}>{user.trusted ? 'Revoke trust' : 'Trust user'}</button>
 <button class="danger" disabled={busy} onclick={() => {if (confirm(`${user.state === 'blocked' ? 'Unblock' : 'Block'} ${user.display_name}?`)) void action(() => updateUser(user, {state: user.state === 'blocked' ? 'active' : 'blocked'}));}}>{user.state === 'blocked' ? 'Unblock' : 'Block profile & devices'}</button>
 <button disabled={busy} onclick={() => {if (confirm('Hide all currently listed photos by this contributor?')) void action(async () => {const all = (await request<{photos: AdminPhoto[]}>('/admin/photos')).photos.filter(photo => photo.uploader_id === user.id && photo.status === 'approved'); for (const photo of all) await moderate(photo, 'pending'); notice = `${all.length} listed photos hidden. Refresh moderation for any further pages.`;});}}>Hide existing approved photos</button>
 <button disabled={busy} onclick={() => {if (confirm('Approve all currently listed pending photos by this contributor? This is separate from trusting future uploads.')) void action(async () => {const pending = (await request<{photos: AdminPhoto[]}>('/admin/photos')).photos.filter(photo => photo.uploader_id === user.id && photo.status === 'pending'); for (const photo of pending) await moderate(photo, 'approved'); notice = `${pending.length} listed pending photos approved.`;});}}>Approve existing pending photos</button>
