@@ -83,15 +83,16 @@ it('organizes anonymously from the direct recipe result and shows the bottom nam
   expect(fetcher.mock.calls.some(([url]) => String(url).includes('/ingredients/parse'))).toBe(false);
   expect(screen.getByRole('button',{name:'Publish recipe'})).toBeDisabled();
 });
-it('ignores whole-recipe results after typing and retains exact source on undo', async () => {
-  const value = localDraft(); let finish!: (value: unknown) => void;
-  mockApi(url => url === '/api/parse' ? new Promise(resolve => finish = resolve) : recipe);
-  render(Editor,{draftId:value.id,navigate:vi.fn()}); await screen.findByLabelText('Paste or write your recipe');
-  await fireEvent.click(screen.getByRole('button',{name:'Organize'})); await waitFor(() => expect(finish).toBeTypeOf('function'));
-  expect(screen.getByRole('status',{name:'Organizing…'})).toBeInTheDocument();
-  await fireEvent.input(screen.getByLabelText('Paste or write your recipe'),{target:{value:' changed\n'}}); finish(parseResult());
-  await waitFor(() => expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue(' changed\n'));
-  expect(screen.queryByLabelText('Ingredient 1.1')).not.toBeInTheDocument();
+it('disables the editor and shows progress beside the action while organizing a recipe', async () => {
+  const value = localDraft(); const pending = (Promise as PromiseConstructor & {withResolvers<T>(): {promise: Promise<T>; resolve(value: T): void; reject(reason?: unknown): void}}).withResolvers<unknown>();
+  mockApi(url => url === '/api/parse' ? pending.promise : recipe);
+  render(Editor,{draftId:value.id,navigate:vi.fn()}); const source = await screen.findByLabelText('Paste or write your recipe');
+  const organize = screen.getByRole('button',{name:'Organize'}); await fireEvent.click(organize);
+  const progress = screen.getByRole('status',{name:'Organizing…'});
+  expect(progress.closest('.toolbar')).toContainElement(organize); expect(source).toBeDisabled(); expect(screen.getByLabelText('Recipe title')).toBeDisabled();
+  expect(source.closest('fieldset')).toHaveAttribute('aria-busy','true');
+  pending.resolve(parseResult()); expect(await screen.findByLabelText('Ingredient 1.1')).toHaveValue('2 eggs');
+  expect(screen.getByLabelText('Recipe title')).toBeEnabled();
 });
 it('single ingredient inputs preserve untouched metadata; Enter inserts and focuses, ignoring IME', async () => {
   const value = localDraft(true); mockApi(() => recipe); const view = render(Editor,{draftId:value.id,navigate:vi.fn()});
@@ -155,16 +156,16 @@ it('pauses same-ID external autosave and forks without overwriting the other tab
   expect(listDrafts()).toHaveLength(2); expect(readDraft(value.id)?.draft.title).toBe('Other tab');
   expect(listDrafts().map(item => readDraft(item.id)?.draft.title)).toContain('My copy');
 });
-it('does not apply a late ingredient preview after reorder or deletion', async () => {
-  const value = localDraft(true); value.draft.ingredient_groups[0].ingredients.push({...ingredient(),id:'second',original_text:'salt'}); saveDraft(value);
-  let finish!: (value: unknown) => void, body = '';
-  mockApi((_url, init) => new Promise(resolve => { finish = resolve; body = init!.body as string; }));
+it('disables structured edits and shows progress beside the action while organizing ingredients', async () => {
+  const value = localDraft(true); const pending = (Promise as PromiseConstructor & {withResolvers<T>(): {promise: Promise<T>; resolve(value: T): void; reject(reason?: unknown): void}}).withResolvers<unknown>(); let body = '';
+  mockApi((_url, init) => { body = init!.body as string; return pending.promise; });
   render(Editor,{draftId:value.id,navigate:vi.fn()});
-  await fireEvent.input(await screen.findByLabelText('Ingredient 1.1'),{target:{value:'2 eggs'}});
-  await fireEvent.click(screen.getByRole('button',{name:'Organize ingredients'})); await waitFor(() => expect(finish).toBeTypeOf('function'));
-  await fireEvent.click(screen.getByRole('button',{name:'Move ingredient 1.1 down'}));
-  await fireEvent.click(screen.getByRole('button',{name:'Remove ingredient 1.2'})); finish(lineResult(body));
-  expect(screen.getByLabelText('Ingredient 1.1')).toHaveValue('salt'); expect(screen.queryByLabelText('Ingredient 1.2')).not.toBeInTheDocument();
+  const input = await screen.findByLabelText('Ingredient 1.1'); await fireEvent.input(input,{target:{value:'2 eggs'}});
+  const organize = screen.getByRole('button',{name:'Organize ingredients'}); await fireEvent.click(organize);
+  const progress = screen.getByRole('status',{name:'Organizing ingredients…'});
+  expect(progress.closest('.toolbar')).toContainElement(organize); expect(input).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Move ingredient 1.1 up'})).toBeDisabled();
+  pending.resolve(lineResult(body)); await waitFor(() => expect(input).toBeEnabled()); expect(input).toHaveValue('2 eggs');
 });
 it('locks edits during a save and ignores responses after teardown while retaining the draft', async () => {
   const value = localDraft(); let finish!: (value: unknown) => void;

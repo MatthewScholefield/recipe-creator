@@ -444,11 +444,11 @@
       {#if discard}<section class="notice"><p>Discard “{draftName}” from this device?</p><button onclick={discardDraft}>Discard draft</button><button onclick={() => discard = false}>Keep draft</button></section>{/if}
     {/if}
     <form onsubmit={(event) => {event.preventDefault(); void publish();}} oninput={changed}>
-      <fieldset disabled={busy || !!recovered}>
+      <fieldset class="editor-fields" disabled={busy || parsing || !!recovered} aria-busy={parsing}>
         <label>Recipe title<input required maxlength="300" bind:value={draft.title}></label>
         {#if draft.mode === 'text'}
           <label>Paste or write your recipe<textarea class="source-editor" rows="20" maxlength="100000" bind:value={draft.source_text} placeholder="Ingredients, directions, and anything else you want to share"></textarea></label>
-          <div class="toolbar"><button type="button" disabled={parsing || !draft.source_text.trim()} onclick={organize}>Organize</button><span class="help">Optional: organize ingredients without rewriting your words.</span></div>
+          <div class="toolbar"><button type="button" disabled={parsing || !draft.source_text.trim()} onclick={organize}>Organize</button>{#if parsing}<Spinner label="Organizing…" size={18} />{/if}<span class="help">Optional: organize ingredients without rewriting your words.</span></div>
         {:else}
           <div class="toolbar"><button type="button" class="ghost" onclick={editText}><Icon name="edit" size={16} />Edit as text</button></div>
           <label>Description<textarea rows="3" bind:value={draft.description}></textarea></label>
@@ -469,7 +469,7 @@
             <button type="button" class="ghost" onclick={() => addRow(group)}><Icon name="plus" size={16} />Add ingredient</button>
             </section>
           {/each}
-          <div class="toolbar"><button type="button" class="ghost" onclick={() => {changed(); draft.ingredient_groups = [...draft.ingredient_groups, {id: crypto.randomUUID(), name: '', ingredients: [ingredient()]}];}}><Icon name="plus" size={16} />Add section</button><button type="button" disabled={parsing || !dirtyIngredientLines(draft, dirty).length} onclick={organizeIngredients}>Organize ingredients</button></div>
+          <div class="toolbar"><button type="button" class="ghost" onclick={() => {changed(); draft.ingredient_groups = [...draft.ingredient_groups, {id: crypto.randomUUID(), name: '', ingredients: [ingredient()]}];}}><Icon name="plus" size={16} />Add section</button><button type="button" disabled={parsing || !dirtyIngredientLines(draft, dirty).length} onclick={organizeIngredients}>Organize ingredients</button>{#if parsing}<Spinner label="Organizing ingredients…" size={18} />{/if}</div>
           <label>Directions<textarea rows="10" bind:value={draft.directions}></textarea></label><label>Notes<textarea rows="5" bind:value={draft.notes}></textarea></label>
         {/if}
         {#if undo}<button type="button" class="ghost" onclick={undoOrganization}>Undo organization</button>{/if}
@@ -485,7 +485,7 @@
         <AuthorPicker recipe={editorRecipe} onchanged={(result) => {editorRecipe = {...editorRecipe!, ...result}; revision = result.revision; notice = `Author changed to ${result.author_name || 'Unknown author'}.`;}} />
       {/if}
       <p class="help" role="status">{persisted}</p>
-      {#if parsing}<div class="toolbar"><Spinner label="Organizing…" /><button type="button" onclick={cancelParse}>Cancel organizing</button></div>{/if}
+      {#if parsing}<div class="toolbar"><button type="button" onclick={cancelParse}>Cancel organizing</button></div>{/if}
       {#if busy}<div class="toolbar"><Spinner label="Saving recipe…" /><button type="button" onclick={() => {cancelWork(); notice = 'Save cancelled. Your draft is retained; retry uses the same publishing key.';}}>Cancel saving</button></div>{/if}
       {#if notice}<p role="status" class="notice">{notice}</p>{/if}
       {#if !hasIdentity}<IdentityPrompt onready={(value) => {appState.identity = value; notice = 'Name set. Review your recipe, then publish.';}} />{/if}
@@ -515,6 +515,7 @@
 <style>
   .line-row{display:flex;align-items:center;gap:.25rem;margin:.4rem 0}.line-row label{flex:1;margin:0;min-width:0}.line-row input{width:100%}.ghost{display:inline-flex;align-items:center;gap:.3rem;background:transparent;border-color:transparent;padding:.35rem .5rem;font-size:.9rem}.ghost:hover:not(:disabled){background:var(--ui-surface-muted);border-color:var(--ui-control-border);color:var(--ui-accent-strong)}.ghost:focus-visible,form button:focus-visible{outline:3px solid var(--ui-accent);outline-offset:3px}.toolbar{flex-wrap:wrap}.dialog-actions{justify-content:flex-end;margin-bottom:0}.draft-actions{margin-bottom:1rem}.draft-badge{font-size:.85rem;color:var(--muted)}.draft-recovery{border-style:dashed;max-width:32rem}.draft-recovery h2{margin-top:0}.draft-recovery-description{margin:.25rem 0;color:var(--muted);font-weight:600}.draft-list{list-style:none;padding:0}.draft-list li{display:flex;justify-content:space-between;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--border)}.draft-list small{display:block}.submit-wrapper{display:inline-flex}.submit-wrapper:focus-visible{outline:2px solid currentColor;outline-offset:4px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
   .draft-diff{margin:1rem 0;padding-top:.75rem;border-top:1px solid var(--line)}.draft-diff h3,.draft-diff h4{margin:.25rem 0}.draft-diff h4{font-size:.95rem}.draft-diff-fields{display:grid;gap:.75rem}.save-actions{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
+  .editor-fields{transition:opacity .15s ease}.editor-fields:disabled{opacity:.72}
   form input:not([type=checkbox]),form textarea{font-weight:400}
   form button:not(.ghost):not(.primary){background:var(--ui-surface);border-color:var(--ui-control-border);color:var(--ui-accent-strong);transition:background-color .15s ease,border-color .15s ease,color .15s ease,box-shadow .15s ease}
   form button:not(.ghost):not(.primary):hover:not(:disabled){background:var(--ui-surface-muted);border-color:var(--ui-accent)}
