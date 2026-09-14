@@ -67,7 +67,7 @@ export function listDrafts(): DraftSummary[] {
       const key = localStorage.key(i);
       if (!key?.startsWith(prefix)) continue;
       const value = readDraft(key.slice(prefix.length));
-      if (value) result.push({id: value.id, name: value.name, updatedAt: value.updatedAt});
+      if (value) result.push({id: value.id, name: value.name === 'Untitled recipe' ? nameOf(value.draft.title) : value.name, updatedAt: value.updatedAt});
     }
   } catch { /* Storage may be unavailable; in-memory editing still works. */ }
   return result.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id));

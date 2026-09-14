@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import Browse from './Browse.svelte';
 import { appState, DEFAULT_SITE_COPY, setSiteCopy } from './app-state.svelte';
-import { createDraft, draftHref, renameDraft } from './drafts';
+import { createDraft, draftHref, renameDraft, saveDraft } from './drafts';
 
 const summary = (id: string, tags: string[] = []) => ({id, title: `Recipe ${id}`, tags, description: '', thumbnail_photo_id: null});
 type Lookup = {ids: string[]; q?: string; tags: string[]};
@@ -57,15 +57,19 @@ it('does not resurrect explicitly removed unavailable bookmarks when filters cha
   expect(screen.queryByText(/saved recipe is unavailable/)).not.toBeInTheDocument();
 });
 
-it('binds live home copy and same-tab draft updates without treating drafts as published recipes', async () => {
-  const draft = createDraft('First local draft');
+it('shows draft recipe titles and relative update times, then applies explicit renames', async () => {
+  const draft = createDraft();
+  draft.draft.title = 'Tomato soup';
+  draft.updatedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  saveDraft(draft);
   mockApi(() => ({items: [], has_more: false}));
   const component = render(Browse, {query: ''});
-  const draftTitle = await screen.findByRole('link', {name: 'First local draft'});
+  const draftTitle = await screen.findByRole('link', {name: 'Tomato soup'});
   expect(draftTitle).toHaveAttribute('href', draftHref(draft.id));
   const draftRegion = screen.getByRole('region', {name: 'Drafts'});
   expect(draftRegion.querySelector('.card')).toHaveClass('draft');
   expect(draftRegion.querySelector('time')).toHaveAttribute('datetime', draft.updatedAt);
+  expect(draftRegion).toHaveTextContent('Updated 10 minutes ago');
   expect(draftRegion.querySelector('img')).toBeNull();
   renameDraft(draft.id, 'Renamed local draft');
   await screen.findByRole('heading', {name: 'Renamed local draft'});
