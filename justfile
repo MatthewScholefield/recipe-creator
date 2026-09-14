@@ -16,7 +16,7 @@ help:
 # Install locked backend and frontend dependencies.
 install:
     {{ UV }} sync --project {{ BACKEND }} --locked
-    {{ BUN }} --cwd {{ FRONTEND }} install --frozen-lockfile
+    cd {{ FRONTEND }} && {{ BUN }} install --frozen-lockfile
 
 # Start the local SurrealKV datastore.
 db:
