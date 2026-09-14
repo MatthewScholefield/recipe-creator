@@ -16,7 +16,7 @@ from recipe_creator.settings import Settings
 def legacy():
     return {"uuid": "F44F2768-6F47-43CD-BAC0-E5758C0A5C94", "title": "  Crème & Tea  ",
             "description": "A paragraph.\n\nSecond\r\n", "directions": "Fold 3 times.\n\nDON'T rewrite!  ",
-            "notes": "=== unusual ---\n\tNotes.", "tags": ["Dinner", " dinner ", "Dinner", ""],
+            "notes": "=== unusual ---\n\tNotes.", "tags": ["Dinner", " dinner ", "Dinner", "", ",foo_+bar", "--Café__AU++lait,"],
             "ingredientCategories": {"": ["  ½ cup milk  ", ""], "Empty": [], "--- Sauce ===": ["salt to taste"]},
             "unknown_metadata": {"keep": [None, 1, "verbatim"]}}
 
@@ -74,11 +74,11 @@ class MemoryRepository:
         return await self.get(table, id)
 
 
-def test_lossless_groups_fields_ids_and_no_invented_metadata(legacy):
+def test_lossless_groups_fields_ids_and_normalized_tags(legacy):
     data = convert_recipe(legacy)
-    for key in ("title", "description", "directions", "notes", "tags"):
+    for key in ("title", "description", "directions", "notes"):
         assert data[key] == legacy[key]
-    assert data["legacy_uuid"] == legacy["uuid"]
+    assert data["tags"] == ["dinner", "foo-bar", "café-au-lait"]
     assert data["owner_id"] is None
     assert data["legacy_created_at"] is None
     assert "created_at" not in data
@@ -214,6 +214,7 @@ async def test_real_organized_idempotent_import(legacy, parse_calls):
             assert found["description"] == "Organized description"
             assert found["directions"] == "Organized directions"
             assert found["notes"] == "Organized notes"
+            assert found["tags"] == ["dinner", "foo-bar", "café-au-lait"]
             assert found["original_snapshot"] == legacy
             assert [group["name"] for group in found["ingredient_groups"]] == ["Ingredients"]
             await repo.update("recipes", legacy["uuid"], {"title": "Edited", "revision": 2})

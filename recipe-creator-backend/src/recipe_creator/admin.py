@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .identity import invalidate_pairings
-from .schemas import AdminUsersResponse, OwnerResult, validate_classifiers
+from .schemas import AdminUsersResponse, OwnerResult, normalize_tags
 from .recipes import _save_revision, invalidate_catalog
 from .jobs import enqueue_enrichment
 from .security import (
@@ -154,7 +154,7 @@ async def restore(recipe_id: str, body: RestoreInput, request: Request):
                     "can_edit", "total_views", "unique_viewers", "idempotency_user_id", "idempotency_snapshot"}
         content = {key: value for key, value in revision["content"].items() if key not in excluded}
         try:
-            validate_classifiers(content.get("tags", []))
+            content["tags"] = normalize_tags(content.get("tags", []))
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
         content["deleted_at"] = None

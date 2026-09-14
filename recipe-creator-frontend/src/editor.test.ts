@@ -145,14 +145,14 @@ it('undoes direct recipe organization and preserves the original source', async 
   await fireEvent.click(screen.getByRole('button',{name:'Undo organization'}));
   expect(await screen.findByLabelText('Paste or write your recipe')).toHaveValue(value.draft.source_text); expect(screen.queryByLabelText('Ingredient 1.1')).not.toBeInTheDocument();
 });
-it('requires explicit tag creation and blocks conflicting classifiers without rewriting legacy tags', async () => {
-  const value = localDraft(true); value.draft.tags = ['Dinner','BREAKFAST','asian']; saveDraft(value); mockApi(() => recipe);
+it('requires explicit canonical tag creation and blocks conflicting classifiers', async () => {
+  const value = localDraft(true); value.draft.tags = ['dinner','breakfast','asian']; saveDraft(value); mockApi(() => recipe);
   render(Editor,{draftId:value.id,navigate:vi.fn()}); expect(await screen.findByRole('alert')).toHaveTextContent('Choose only one meal type');
-  expect(screen.getByRole('button',{name:'Publish recipe'})).toBeDisabled(); await fireEvent.click(screen.getByRole('button',{name:'Remove BREAKFAST'}));
-  const picker = screen.getByRole('combobox',{name:'Tags'}); await fireEvent.input(picker,{target:{value:'New tag'}}); await fireEvent.blur(picker);
-  expect(screen.queryByRole('button',{name:'Remove New tag'})).not.toBeInTheDocument();
-  await fireEvent.focus(picker); await fireEvent.click(screen.getByRole('button',{name:'Create “New tag”'}));
-  expect(screen.getByRole('button',{name:'Remove New tag'})).toBeInTheDocument(); expect(screen.getByRole('button',{name:'Publish recipe'})).toBeEnabled();
+  expect(screen.getByRole('button',{name:'Publish recipe'})).toBeDisabled(); await fireEvent.click(screen.getByRole('button',{name:'Remove breakfast'}));
+  const picker = screen.getByRole('combobox',{name:'Tags'}); await fireEvent.input(picker,{target:{value:'New _,+tag'}}); await fireEvent.blur(picker);
+  expect(screen.queryByRole('button',{name:'Remove new-tag'})).not.toBeInTheDocument();
+  await fireEvent.focus(picker); await fireEvent.click(screen.getByRole('button',{name:'Create “new-tag”'}));
+  expect(screen.getByRole('button',{name:'Remove new-tag'})).toBeInTheDocument(); expect(screen.getByRole('button',{name:'Publish recipe'})).toBeEnabled();
 });
 it('retains the same idempotency key across failed POST and retry', async () => {
   const value = localDraft(true); let count = 0;

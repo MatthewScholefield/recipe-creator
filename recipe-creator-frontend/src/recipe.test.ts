@@ -114,11 +114,12 @@ describe('ingredient line editing', () => {
   });
 });
 describe('editor tag validation', () => {
-  it('normalizes newly selected tags without treating cuisine as meal types', () => {
-    expect(normalizeTags([' DINNER ', 'dinner', 'Cafe\u0301', 'Café'])).toEqual(['dinner','Café']);
-    expect(tagError(['Dinner','BREAKFAST'])).toBe(classifierMessage);
-    expect(tagError(['Dinner','deſſert'])).toBe(classifierMessage);
+  it('canonicalizes tags and validates classifier and kebab-case rules', () => {
+    expect(normalizeTags([' DINNER ', 'dinner', 'Cafe\u0301', 'Café', ',foo_+bar'])).toEqual(['dinner','café','foo-bar']);
+    expect(tagError(['dinner','breakfast'])).toBe(classifierMessage);
+    expect(tagError(['dinner','deſſert'])).toBe(classifierMessage);
     expect(tagError(['dinner','american','asian','indian','mexican'])).toBe('');
+    expect(tagError(['not valid'])).toContain('kebab-case');
   });
 });
 describe('local preferences and legacy links', () => {

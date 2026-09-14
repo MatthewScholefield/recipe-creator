@@ -334,11 +334,8 @@ async def list_recipes(request: Request, response: Response, q: str = Query(defa
 @router.get("/tags", response_model=TagCatalog)
 async def list_tags(request: Request, response: Response):
     catalog = await _catalog(request.app.state.repo)
-    spellings = sorted({tag for item in catalog for tag in item["tags"]}, key=lambda tag: (tag_key(tag), tag))
-    representatives = {}
-    for tag in spellings:
-        representatives.setdefault(tag_key(tag), tag_key(tag) if tag_key(tag) in MEAL_CLASSIFIERS else tag)
-    return _revalidate(request, response, {"tags": list(representatives.values()), "classifier_tags": list(MEAL_CLASSIFIERS)})
+    tags = sorted({tag_key(tag) for item in catalog for tag in item["tags"]} - {""})
+    return _revalidate(request, response, {"tags": tags, "classifier_tags": list(MEAL_CLASSIFIERS)})
 
 
 def _stable_id(seed, kind, index):

@@ -177,17 +177,28 @@ export function applyParse(draft: RecipeDraft, result: ParseResult): RecipeDraft
 }
 export const MEAL_CLASSIFIERS = ['breakfast', 'lunch', 'dinner', 'dessert'] as const;
 export const classifierMessage = 'Choose only one meal type: breakfast, lunch, dinner or dessert.';
-const tagKey = (value: string) => value.trim().normalize('NFC').toLowerCase().replace(/ß/g, 'ss').replace(/ſ/g, 's').replace(/ς/g, 'σ');
+export function tagInput(value: string): string {
+  return value.normalize('NFC').toLocaleLowerCase()
+    .replace(/ß/g, 'ss').replace(/ſ/g, 's').replace(/ς/g, 'σ')
+    .replace(/[^\p{L}\p{N}]+/gu, '-');
+}
+export function canonicalTag(value: string): string {
+  return tagInput(value).replace(/^-+|-+$/g, '');
+}
 export function normalizeTags(tags: string[]): string[] {
   const seen = new Set<string>();
-  return tags.map(tag => tag.trim().normalize('NFC')).filter(tag => {
-    const key = tagKey(tag); if (seen.has(key)) return false; seen.add(key); return true;
-  }).map(tag => MEAL_CLASSIFIERS.some(meal => meal === tagKey(tag)) ? tagKey(tag) : tag);
+  return tags.map(canonicalTag).filter(tag => {
+    if (!tag || seen.has(tag)) return false;
+    seen.add(tag); return true;
+  });
 }
 export function tagError(tags: string[]): string {
   const normalized = normalizeTags(tags);
-  if (normalized.filter(tag => MEAL_CLASSIFIERS.some(meal => meal === tagKey(tag))).length > 1) return classifierMessage;
-  return normalized.length > 50 || normalized.some(tag => !tag || [...tag].length > 80) ? 'Choose up to 50 tags, each 1–80 characters.' : '';
+  if (normalized.filter(tag => MEAL_CLASSIFIERS.includes(tag as typeof MEAL_CLASSIFIERS[number])).length > 1) return classifierMessage;
+  if (normalized.length > 50 || tags.some(tag => tag !== canonicalTag(tag) || [...tag].length > 80)) {
+    return 'Use up to 50 lowercase kebab-case tags, each 1–80 letters or numbers.';
+  }
+  return '';
 }
 export function ingredientLine(row: Ingredient): string { return row.original_text || ingredientText(row); }
 export function changedIngredient(row: Ingredient, text: string): Ingredient {

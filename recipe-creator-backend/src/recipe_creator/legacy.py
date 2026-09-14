@@ -11,6 +11,7 @@ from logly import logger
 
 from . import ai
 from .repository import ConflictError, Repository
+from .schemas import normalize_import_tags
 from .settings import Settings
 
 
@@ -44,7 +45,7 @@ def snapshot_hash(record: dict) -> str:
 
 
 def convert_recipe(record: dict) -> dict:
-    """No parsing, normalization, inferred authorship, or inferred publication date."""
+    """Preserve source prose and metadata while normalizing legacy tags."""
     if not isinstance(record, dict):
         raise ValueError("Each recipe must be an object")
     identifier = record.get("uuid")
@@ -86,7 +87,7 @@ def convert_recipe(record: dict) -> dict:
         "title": record["title"], "description": record["description"],
         "mode": "structured", "status": "published", "source_text": "\n\n".join(body),
         "ingredient_groups": groups, "directions": record["directions"], "notes": record["notes"],
-        "tags": deepcopy(tags), "source_url": "", "modifications": "", "revision": 1,
+        "tags": normalize_import_tags(tags), "source_url": "", "modifications": "", "revision": 1,
         "owner_id": None, "legacy_uuid": identifier, "legacy_created_at": None,
         "original_snapshot": deepcopy(record), "original_snapshot_hash": snapshot_hash(record),
     }

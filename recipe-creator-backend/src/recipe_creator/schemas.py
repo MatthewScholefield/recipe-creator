@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 
@@ -11,29 +11,57 @@ MEAL_CLASSIFIERS = ('breakfast', 'lunch', 'dinner', 'dessert')
 
 
 def tag_key(value: str) -> str:
+    """Return the canonical lowercase kebab-case representation of a tag."""
     import unicodedata
-    return unicodedata.normalize('NFC', value.strip()).casefold()
+    value = unicodedata.normalize("NFC", value).casefold()
+    result = []
+    pending_dash = False
+    for character in value:
+        if character.isalnum():
+            if pending_dash and result:
+                result.append("-")
+            result.append(character)
+            pending_dash = False
+        else:
+            pending_dash = True
+    return "".join(result)
 
 
 def validate_classifiers(tags):
-    if len({tag_key(tag) for tag in tags} & set(MEAL_CLASSIFIERS)) > 1:
+    if len(set(tags) & set(MEAL_CLASSIFIERS)) > 1:
         raise ValueError('Choose only one meal type: breakfast, lunch, dinner or dessert.')
     return tags
 
 
+def normalize_import_tags(tags):
+    """Canonicalize untrusted legacy tags, dropping empty and duplicate results."""
+    result = []
+    seen = set()
+    for tag in tags:
+        value = tag_key(tag)
+        if value and value not in seen:
+            result.append(value)
+            seen.add(value)
+    return result
+
+
 def normalize_tags(tags):
-    import unicodedata
+    """Validate API tags and deduplicate them without accepting noncanonical input."""
     if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
         raise ValueError('Tags must be a list of strings')
-    result, seen = [], set()
-    for tag in tags:
-        key = tag_key(tag)
-        if not key:
-            raise ValueError('Tags must not be blank')
-        if key not in seen:
-            result.append(key if key in MEAL_CLASSIFIERS else unicodedata.normalize('NFC', tag.strip()))
-            seen.add(key)
+    if any(not tag or tag != tag_key(tag) for tag in tags):
+        raise ValueError('Tags must use lowercase kebab-case with letters and numbers')
+    result = list(dict.fromkeys(tags))
     return validate_classifiers(result)
+
+
+def canonical_tag(value: str) -> str:
+    if value != tag_key(value):
+        raise ValueError('Tags must use lowercase kebab-case with letters and numbers')
+    return value
+
+
+Tag = Annotated[str, Field(min_length=1, max_length=80), AfterValidator(canonical_tag)]
 
 
 ShortText = Annotated[str, Field(max_length=500)]
@@ -80,7 +108,7 @@ class RecipeDraft(StrictDTO):
     ingredient_groups: list[IngredientGroup] = Field(default_factory=list, max_length=50)
     directions: Prose = ""
     notes: Prose = ""
-    tags: list[Annotated[str, Field(min_length=1, max_length=80)]] = Field(default_factory=list, max_length=50)
+    tags: list[Tag] = Field(default_factory=list, max_length=50)
     yield_amount: Amount | None = None
     yield_unit: ShortText = ""
     source_url: Annotated[str, Field(max_length=2048)] = ""
@@ -329,7 +357,6 @@ class TagCatalog(BaseModel):
     classifier_tags: list[str]
 
 
-Tag = Annotated[str, Field(min_length=1, max_length=80)]
 
 
 class RecipeLookupRequest(StrictDTO):

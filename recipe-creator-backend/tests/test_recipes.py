@@ -16,7 +16,7 @@ from recipe_creator import ai, recipes
 from recipe_creator.ingredients import ingredient_hash
 from recipe_creator.photos import PhotoService
 from recipe_creator.repository import ConflictError, Repository
-from recipe_creator.schemas import RecipeCatalogProjection, RecipeDraft
+from recipe_creator.schemas import RecipeCatalogProjection, RecipeDraft, tag_key
 from recipe_creator.security import ADMIN_COOKIE, DEVICE_COOKIE, digest, now
 from recipe_creator.settings import Settings
 
@@ -148,6 +148,8 @@ async def identify(app, browser, name="Alice"):
 async def test_crud_idempotency_original_snapshot_and_history(app):
     async with client(app) as browser:
         user = await identify(app, browser)
+        invalid_tag = await browser.post("/recipes", json=draft(tags=[",foo_+bar"]))
+        assert invalid_tag.status_code == 422
         response = await browser.post("/recipes", json=draft(owner_id="forged"), headers={"Idempotency-Key": "stable"})
         assert response.status_code == 201, response.text
         original = response.json()
@@ -356,18 +358,20 @@ async def test_parse_quota_recipe_fields_and_sanitized_failure(app, monkeypatch)
         assert calls == ["text", source]
 
 
-@pytest.mark.parametrize('tags', [['Breakfast', 'DINNER'], ['lunch', 'dessert']])
+@pytest.mark.parametrize('tags', [['breakfast', 'dinner'], ['lunch', 'dessert']])
 def test_classifier_rejection(tags):
     with pytest.raises(ValidationError, match='Choose only one meal type'):
         RecipeDraft(**draft(tags=tags))
 
 
-def test_tags_normalize_dedupe_before_bounds():
-    value = RecipeDraft(**draft(tags=[' Dinner ', 'DINNER', 'Cafe\u0301', 'Café', 'Indian']))
-    assert value.tags == ['dinner', 'Café', 'Indian']
-    assert RecipeDraft(**draft(tags=['dinner'] * 100)).tags == ['dinner']
-    with pytest.raises(ValidationError):
-        RecipeDraft(**draft(tags=[' ']))
+def test_tags_validate_dedupe_before_bounds():
+    assert tag_key(",foo_+bar") == "foo-bar"
+    value = RecipeDraft(**draft(tags=["dinner", "dinner", "café-au-lait"]))
+    assert value.tags == ["dinner", "café-au-lait"]
+    assert RecipeDraft(**draft(tags=["dinner"] * 100)).tags == ["dinner"]
+    for invalid in [" Dinner ", "foo_bar", "-foo", "foo-", "foo--bar", ""]:
+        with pytest.raises(ValidationError, match="kebab-case"):
+            RecipeDraft(**draft(tags=[invalid]))
 
 
 async def test_selected_tags_lookup_privacy_and_complete_retrieval(app):

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import Icon from './Icon.svelte';
+  import { canonicalTag, tagInput } from '../recipe';
   import Tag from './Tag.svelte';
 
   interface Props {
@@ -28,10 +29,10 @@
   const listId = `tags-${Math.random().toString(36).slice(2)}`;
   let normalized = $derived(query.trim().toLocaleLowerCase());
   let matches = $derived(tags.filter((tag) => !selected.includes(tag) && tag.toLocaleLowerCase().includes(normalized)));
-  let createValue = $derived(query.trim());
-  let canCreate = $derived(allowCreate && createValue.length > 0 && !tags.some((tag) => tag.localeCompare(createValue, undefined, {sensitivity: 'accent'}) === 0) && !selected.some((tag) => tag.localeCompare(createValue, undefined, {sensitivity: 'accent'}) === 0));
+  let createValue = $derived(canonicalTag(query));
+  let canCreate = $derived(allowCreate && query === createValue && createValue.length > 0 && [...createValue].length <= 80 && !tags.some((tag) => tag === createValue) && !selected.some((tag) => tag === createValue));
   let optionCount = $derived(matches.length + (canCreate ? 1 : 0));
-  function choose(tag: string) { selected = single ? [tag] : [...selected, tag]; onchange?.(selected); query = ''; activeIndex = 0; if (single) expanded = false; input?.focus(); }
+  function choose(tag: string) { const value = canonicalTag(tag); if (!value) return; selected = single ? [value] : [...selected, value]; onchange?.(selected); query = ''; activeIndex = 0; if (single) expanded = false; input?.focus(); }
   function remove(tag: string) { selected = selected.filter((current) => current !== tag); onchange?.(selected); input?.focus(); }
   function keydown(event: KeyboardEvent) {
     if (event.key === 'ArrowDown') { event.preventDefault(); expanded = true; activeIndex = Math.min(activeIndex + 1, Math.max(optionCount - 1, 0)); }
@@ -49,7 +50,7 @@
   <div class="tag-control" class:expanded onfocusout={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) void collapse(); }}>
     <div class="tag-chips">
       {#if !compact}{#each selected as tag}<Tag label={tag} removable onclick={() => remove(tag)} />{/each}{/if}
-      <input bind:this={input} id={listId} aria-label={compact ? label : undefined} type="search" role="combobox" aria-expanded={expanded} aria-controls={`${listId}-options`} aria-activedescendant={expanded && optionCount ? `${listId}-option-${activeIndex}` : undefined} autocomplete="off" {placeholder} bind:value={query} onfocus={() => expanded = true} oninput={() => { expanded = true; activeIndex = 0; }} onkeydown={keydown} />
+      <input bind:this={input} id={listId} aria-label={compact ? label : undefined} type="search" role="combobox" aria-expanded={expanded} aria-controls={`${listId}-options`} aria-activedescendant={expanded && optionCount ? `${listId}-option-${activeIndex}` : undefined} autocomplete="off" {placeholder} maxlength="80" value={query} onfocus={() => expanded = true} oninput={(event) => { query = tagInput(event.currentTarget.value); expanded = true; activeIndex = 0; }} onkeydown={keydown} />
     </div>
     {#if expanded && (matches.length || canCreate)}
       <ul id={`${listId}-options`} role="listbox" aria-label={`${label} options`}>
