@@ -113,12 +113,6 @@ async def test_anonymous_transform_and_lookup_security(identity_app, monkeypatch
             "yield_unit": "",
             "source_url": "",
         }
-    async def organized_lines(lines, settings):
-        return ai.IngredientBatchOutput(items=[
-            ai.ParsedIngredientLine(id=line["id"], original_text=line["text"], name=line["text"])
-            for line in lines
-        ])
-    monkeypatch.setattr(ai, 'parse_ingredient_lines_batch', organized_lines)
     monkeypatch.setattr(ai, 'parse_recipe', organized)
     async with client(identity_app) as browser:
         endpoints = [('/parse', {'source_text': 'Exact source'}),
@@ -156,8 +150,8 @@ async def test_identity_hashes_updates_revocation_and_expiry(identity_app):
         assert device["secret_hash"] == digest(secret) and secret not in str(device)
         response = await browser.patch("/identity", json={"display_name": " New name "})
         assert response.json()["user"]["display_name"] == "New name"
-        assert "trusted" in response.json()["user"] and "photo_trust" not in response.json()["user"] and "photo_trusted" not in response.json()["user"]
-        assert (await browser.patch("/identity", json={"display_name": "X", "trusted": True})).status_code == 422
+        assert "photo_trusted" in response.json()["user"] and "photo_trust" not in response.json()["user"]
+        assert (await browser.patch("/identity", json={"display_name": "X", "photo_trusted": True})).status_code == 422
         listing = (await browser.get("/devices")).json()
         assert listing["items"] == listing["devices"] and listing["items"][0]["current"]
         await repo.update("devices", device_id, {"expires_at": now() + timedelta(minutes=1)})

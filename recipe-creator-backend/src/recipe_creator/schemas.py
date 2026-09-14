@@ -90,7 +90,7 @@ class RecipeDraft(StrictDTO):
     @classmethod
     def discard_authority(cls, value):
         if isinstance(value, dict):
-            readonly = {"owner_id", "author_name", "can_edit", "photo_trust", "photo_trusted", "admin", "trusted", "total_views", "unique_viewers"}
+            readonly = {"owner_id", "author_name", "can_edit", "photo_trust", "photo_trusted", "admin", "trusted"}
             return {key: item for key, item in value.items() if key not in readonly}
         return value
 
@@ -189,20 +189,13 @@ class Recipe(BaseModel):
     yield_unit: str
     source_url: str
     modifications: str
-    total_views: int = Field(default=0, ge=0)
-    unique_viewers: int = Field(default=0, ge=0)
-
-
-class RecipeViewCounts(BaseModel):
-    total_views: int = Field(default=0, ge=0)
-    unique_viewers: int = Field(default=0, ge=0)
 
 
 class PublicUser(BaseModel):
     id: str
     display_name: str
     state: str
-    trusted: bool
+    photo_trusted: bool
     merged_into: str | None = None
 
 
@@ -299,8 +292,6 @@ class RecipeSummary(BaseModel):
     tags: list[str]
     owner_id: str | None
     author_name: str | None
-    total_views: int = Field(default=0, ge=0)
-    unique_viewers: int = Field(default=0, ge=0)
 
 
 class RecipeSummaryGroup(BaseModel):
@@ -316,7 +307,6 @@ class RecipeListResponse(BaseModel):
     has_more: bool
     errors: list[str]
     groups: list[RecipeSummaryGroup]
-    popular: list[RecipeSummary] = Field(default_factory=list)
 
 
 class TagCatalog(BaseModel):

@@ -8,7 +8,7 @@ import App from './App.svelte';
 import Profile from './Profile.svelte';
 import { createDraft, saveDraft, draftHref } from './drafts';
 import { appState, DEFAULT_SITE_COPY, refreshSiteCopy, setSiteCopy } from './app-state.svelte';
-const user = {id:'u1',display_name:'Cook',state:'active',trusted:false};
+const user = {id:'u1',display_name:'Cook',state:'active',photo_trusted:false};
 const identity = {user,device_id:'d1',admin:true,csrf_token:'csrf'};
 const recipe = {id:'r1',revision:2,owner_id:'u1',author_name:'Cook'};
 function mockApi(handler: (url: string, init?: RequestInit) => unknown | Promise<unknown>) {
@@ -132,21 +132,4 @@ it('requires confirmation to revoke this browser and preserves local records', a
   render(Profile,{consumeToken:vi.fn()}); await screen.findByText(/Browser \(this device\)/); await fireEvent.click(screen.getByText('Devices'));
   await fireEvent.click(screen.getByRole('button',{name:'Revoke'})); expect(revoked).toBe(false); await screen.findByRole('dialog',{name:'Revoke device access?'});
   await fireEvent.click(screen.getByRole('button',{name:'Revoke access'})); await waitFor(() => expect(appState.identity?.user).toBeNull()); expect(localStorage.getItem('notebook:bookmarks')).toBe('["r1"]'); expect(localStorage.getItem('notebook:draft:v2:draft')).toBe('keep');
-});
-
-it('uses generalized trust wording and sends only the trusted field', async () => {
-  const confirm = vi.spyOn(window,'confirm').mockReturnValue(true);
-  const fetcher = mockApi((url) => url === '/api/session' ? identity
-    : url === '/api/admin/photos' ? {photos:[{id:'p1',recipe_id:'r1',uploader_id:'u2',caption:'',status:'pending'}]}
-    : url.startsWith('/api/admin/users?') ? {users:[{...user,id:'u2',display_name:'Other'}]}
-    : {user:{...user,id:'u2',trusted:true}});
-  render(Admin);
-  await fireEvent.click(await screen.findByRole('button',{name:'Trust user'}));
-  expect(confirm).toHaveBeenCalledWith('Trust this user? Future photos can be approved automatically and future views will be classified as trusted. Existing pending photos still need approval.');
-  const write = fetcher.mock.calls.find(([url,init]) => url === '/api/admin/users/u2' && init?.method === 'PATCH');
-  expect(JSON.parse(String(write?.[1]?.body))).toEqual({trusted:true});
-  await waitFor(() => expect(screen.getByRole('button',{name:'users'})).toBeEnabled());
-  await fireEvent.click(screen.getByRole('button',{name:'users'}));
-  expect(await screen.findByText(/Untrusted user/)).toBeInTheDocument();
-  expect(screen.getByRole('button',{name:'Trust user'})).toBeInTheDocument();
 });

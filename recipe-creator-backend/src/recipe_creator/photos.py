@@ -222,7 +222,7 @@ class PhotoService:
                     "status": "uploading", "storage_key": token + ".jpg",
                     "thumbnail_key": token + "_thumb.jpg", "reserved_bytes": reserve,
                     "upload_token": token, "lease_until": (datetime.now(UTC) + timedelta(seconds=LEASE_SECONDS)).isoformat(),
-                    "trusted_upload": bool(current_user.get("trusted")), "size_bytes": 0}
+                    "trusted_upload": bool(current_user.get("photo_trust")), "size_bytes": 0}
             row = (await tx.update("photos", photo_id, data) if previous
                    else await tx.create("photos", data, id=photo_id))
             return row, True
@@ -253,7 +253,7 @@ class PhotoService:
                 return await tx.update("photos", photo_id, {
                     **result, "reserved_bytes": result["stored_bytes"], "lease_until": None,
                     "uploader_id": current_user["id"],
-                    "status": "approved" if row["trusted_upload"] and current_user.get("trusted") else "pending"})
+                    "status": "approved" if row["trusted_upload"] and current_user.get("photo_trust") else "pending"})
 
             return _public(await self._retry(finish))
         except BaseException:

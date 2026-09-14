@@ -202,7 +202,7 @@ def test_real_backup_restore_complete_database_and_media(tmp_path):
     async def seed():
         async with Repository(settings) as repo:
             await repo.migrate()
-            user = await repo.create("users", {"display_name": "Restore Author", "trusted": True})
+            user = await repo.create("users", {"display_name": "Restore Author", "photo_trust": True})
             recipe = await repo.create("recipes", {"title": "Restore Recipe", "owner_id": user["id"],
                                                    "directions": "exact prose\n\n", "tags": ["Dinner"]})
             await repo.create("devices", {"user_id": user["id"], "secret_hash": "test-digest"})

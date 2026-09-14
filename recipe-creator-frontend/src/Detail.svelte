@@ -3,7 +3,7 @@
   import { request, mutate, message, id } from './api';
   import { load, save, safeUrl } from './local';
   import { gramEstimateText, gramText, ingredientAmount, ingredientText, quantity } from './recipe';
-  import type { Ingredient, Recipe, RecipeViewCounts } from './types';
+  import type { Ingredient, Recipe } from './types';
   import Photos from './Photos.svelte';
   import Button from './ui/Button.svelte';
   import Icon from './ui/Icon.svelte';
@@ -22,9 +22,7 @@
   let lock: WakeLockSentinel | undefined;
   let alive = true;
   const lifetime = new AbortController();
-  let refreshTimer: ReturnType<typeof setTimeout> | undefined, visibilityListener: (() => void) | undefined;
-  let registrationStarted = false, fetchStarted = 0, registrationCompletedAt = 0;
-  let registeredCounts: RecipeViewCounts | undefined;
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
   function scheduleRecipeRefresh(value: Recipe) {
     clearTimeout(refreshTimer);
@@ -32,54 +30,8 @@
       refreshTimer = setTimeout(() => void fetchRecipe(), 2000);
     }
   }
-  async function registerView() {
-    if (registrationStarted) return;
-    registrationStarted = true;
-    if (visibilityListener) document.removeEventListener('visibilitychange', visibilityListener);
-    visibilityListener = undefined;
-    try {
-      const counts = await mutate<RecipeViewCounts>(`/recipes/${id(recipeId)}/views`, undefined, 'POST', lifetime.signal);
-      if (alive) {
-        registeredCounts = counts;
-        registrationCompletedAt = fetchStarted;
-        if (recipe) recipe = {...recipe, ...counts};
-      }
-    } catch(e) {
-      if (!lifetime.signal.aborted && !(e instanceof DOMException && e.name === 'AbortError')) console.error('View registration failed', e);
-    }
-  }
-  function registerWhenVisible() {
-    if (registrationStarted || visibilityListener) return;
-    if (document.visibilityState === 'visible') void registerView();
-    else {
-      visibilityListener = () => {
-        if (document.visibilityState === 'visible') void registerView();
-      };
-      document.addEventListener('visibilitychange', visibilityListener);
-    }
-  }
-  async function fetchRecipe() {
-    const sequence = ++fetchStarted;
-    error = '';
-    try {
-      const result = await request<Recipe>(`/recipes/${id(recipeId)}`, {signal: lifetime.signal});
-      if (alive) {
-        recipe = registeredCounts && sequence <= registrationCompletedAt ? {...result, ...registeredCounts} : result;
-        scheduleRecipeRefresh(result);
-        registerWhenVisible();
-      }
-    } catch(e) { if (alive) error = message(e); }
-  }
-  onMount(() => {
-    void fetchRecipe();
-    return () => {
-      alive = false;
-      clearTimeout(refreshTimer);
-      lifetime.abort();
-      if (visibilityListener) document.removeEventListener('visibilitychange', visibilityListener);
-      void lock?.release();
-    };
-  });
+  async function fetchRecipe() { error = ''; try { const result = await request<Recipe>(`/recipes/${id(recipeId)}`, {signal: lifetime.signal}); if (alive) { recipe = result; scheduleRecipeRefresh(result); } } catch(e) { if (alive) error = message(e); } }
+  onMount(() => { void fetchRecipe(); return () => { alive = false; clearTimeout(refreshTimer); lifetime.abort(); void lock?.release(); }; });
   $effect(() => { save('grams', grams); save(`checked:${recipeId}`, checked); save('bookmarks', bookmarks); });
   const factor = $derived(Number.isFinite(scale) && scale > 0 ? scale : 1);
 
@@ -123,23 +75,12 @@
   function scaleBadge(row: Ingredient) {
     return factor !== 1 && (!grams || !hasGramWeight(row)) && (!row.name || quantity(row.quantity) === null);
   }
-  function compactViews(value: number) {
-    return new Intl.NumberFormat('en', {notation: 'compact', maximumFractionDigits: 1}).format(value);
-  }
-  function viewDetails(value: Recipe) {
-    const format = new Intl.NumberFormat('en');
-    return `Total views: ${format.format(value.total_views)}\nUnique viewers: ${format.format(value.unique_viewers)}`;
-  }
 </script>
 {#if error}<p class="notice error" role="alert">{error} <button onclick={fetchRecipe}>Reload recipe</button></p>{/if}
 {#if recipe}
 <article class="recipe">
 <BackLink href="/" label="Back to collection" />
-<div class="byline"><p class="eyebrow">From {recipe.author_name || 'Unknown author'}</p><Tooltip text={viewDetails(recipe)} clickable>
-  {#snippet trigger({id: tooltipId, expanded, toggle})}
-    <button type="button" class="view-count no-print" onclick={toggle} aria-expanded={expanded} aria-describedby={expanded ? tooltipId : undefined} aria-label={`View statistics: ${recipe!.total_views} total views, ${recipe!.unique_viewers} unique viewers`}>{compactViews(recipe!.total_views)} views</button>
-  {/snippet}
-</Tooltip></div>
+<div class="byline"><p class="eyebrow">From {recipe.author_name || 'Unknown author'}</p></div>
 <h1>{recipe.title}</h1>
 <Markdown source={recipe.description} class="prose lead" />
 <div class="chips">{#each recipe.tags as tag}<Tag label={tag} href={`/?q=${encodeURIComponent(`tag:${tag}`)}`} />{/each}</div>
@@ -231,5 +172,5 @@
 {:else if !error}<p role="status">Opening the recipe…</p>{/if}
 
 <style>
-  .byline,.controls-heading{display:flex;align-items:center;gap:.5rem}.byline .eyebrow{margin:0}.view-count{min-height:32px;padding:.25rem .45rem;border:1px solid transparent;border-radius:.4rem;background:transparent;color:var(--muted);font:inherit;font-size:.78rem;cursor:pointer}.view-count:hover,.view-count:focus-visible{border-color:var(--ui-control-border);background:var(--ui-surface)}.controls-heading{justify-content:flex-start;margin-bottom:.5rem}.controls-heading h2{margin:0}.small-control{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:.3rem .5rem;border:1px solid transparent;border-radius:.4rem;background:transparent;color:var(--ui-text);cursor:pointer}.small-control:hover{border-color:var(--ui-control-border);background:var(--ui-surface)}.ingredient-settings{box-sizing:border-box;width:18rem;max-width:calc(100vw - 2.2rem);padding:.35rem;display:flex;flex-direction:column;gap:.8rem}.settings-group{display:flex;flex-direction:column;gap:.35rem}.settings-label{font-size:.8rem;font-weight:650;color:var(--ui-muted)}.weight-state{display:flex;align-items:center;gap:.4rem;color:var(--ui-muted)}.recipe-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:2rem}.ingredient{display:flex;align-items:flex-start;gap:.6rem;padding:.3rem 0}.ingredient.checked .ingredient-copy{text-decoration:line-through;color:var(--ui-muted)}.ingredient input{margin-top:.35rem}.ingredient-copy{min-width:0}.amount-trigger{display:inline;padding:.08rem .18rem;margin:-.08rem -.18rem;border:0;border-bottom:1px dotted currentColor;background:transparent;color:inherit;font:inherit;cursor:pointer}.amount-trigger.unavailable{color:var(--ui-muted)}.scale-badge{display:inline-block;margin-right:.35rem;padding:.02rem .3rem;border-radius:.3rem;background:var(--ui-surface-muted);color:var(--ui-muted);font-size:.78rem}@media(max-width:700px){.recipe-columns{grid-template-columns:1fr}}
+  .byline,.controls-heading{display:flex;align-items:center;gap:.5rem}.byline .eyebrow{margin:0}.controls-heading{justify-content:flex-start;margin-bottom:.5rem}.controls-heading h2{margin:0}.small-control{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:.3rem .5rem;border:1px solid transparent;border-radius:.4rem;background:transparent;color:var(--ui-text);cursor:pointer}.small-control:hover{border-color:var(--ui-control-border);background:var(--ui-surface)}.ingredient-settings{box-sizing:border-box;width:18rem;max-width:calc(100vw - 2.2rem);padding:.35rem;display:flex;flex-direction:column;gap:.8rem}.settings-group{display:flex;flex-direction:column;gap:.35rem}.settings-label{font-size:.8rem;font-weight:650;color:var(--muted)}.ingredient-settings label{display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-size:.9rem}.ingredient-settings input{width:6rem;min-height:32px;padding:.25rem .4rem}.ingredient{align-items:center}.ingredient input{margin:0}.ingredient-copy{min-width:0}.amount-trigger{display:inline;padding:0;min-height:0;border:0;border-radius:0;background:transparent;color:inherit;font:inherit;font-weight:inherit;line-height:inherit;text-align:left;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px;cursor:pointer}.amount-trigger:hover{background:transparent;color:var(--ui-accent-strong);text-decoration-style:solid}.weight-state{display:flex;align-items:center;gap:.5rem;color:var(--muted)}
 </style>

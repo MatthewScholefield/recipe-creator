@@ -65,8 +65,8 @@ def upload_file(format="PNG", size=(64, 48), **options):
 @pytest_asyncio.fixture
 async def service(tmp_path):
     repo = MemoryRepo()
-    await repo.create("users", {"state": "active", "trusted": False}, "owner")
-    await repo.create("users", {"state": "active", "trusted": False}, "uploader")
+    await repo.create("users", {"state": "active", "photo_trust": False}, "owner")
+    await repo.create("users", {"state": "active", "photo_trust": False}, "uploader")
     await repo.create("recipes", {"owner_id": "owner", "deleted_at": None}, "recipe")
     return PhotoService(repo, Settings(media_root=tmp_path))
 
@@ -116,7 +116,7 @@ async def test_caption_boundaries_preserve_authored_text(service):
 
 async def test_trust_only_affects_future_uploads_moderation_and_recipe_deletion(service):
     pending = await put(service)
-    await service.repo.update("users", "uploader", {"trusted": True})
+    await service.repo.update("users", "uploader", {"photo_trust": True})
     assert await service.visible_photos() == []
     approved = await put(service, idempotency_key="next")
     assert approved["status"] == "approved"
@@ -391,7 +391,7 @@ async def merge_uploader(repo):
     async with repo.transaction() as tx:
         source = await tx.get("users", "uploader")
         target = await tx.get("users", "owner")
-        await tx.update("users", "owner", {"trusted": bool(source.get("trusted") and target.get("trusted"))})
+        await tx.update("users", "owner", {"photo_trust": bool(source.get("photo_trust") and target.get("photo_trust"))})
         for row in await tx.list("photos", {"uploader_id": "uploader"}):
             await tx.update("photos", row["id"], {"uploader_id": "owner"})
         await merge_usage(tx, "uploader", "owner")
@@ -458,7 +458,7 @@ async def test_merge_preserves_existing_daily_quota(service):
 
 @pytest.mark.parametrize("mutation", ["merge", "uploader_block", "owner_block", "hidden", "deleted", "untrust"])
 async def test_processing_revalidates_current_ownership_and_access(service, monkeypatch, mutation):
-    await service.repo.update("users", "uploader", {"trusted": True})
+    await service.repo.update("users", "uploader", {"photo_trust": True})
     original = service._thread
 
     async def thread(function, *args):
@@ -469,7 +469,7 @@ async def test_processing_revalidates_current_ownership_and_access(service, monk
             elif mutation.endswith("_block"):
                 await service.repo.update("users", mutation.removesuffix("_block"), {"state": "blocked"})
             elif mutation == "untrust":
-                await service.repo.update("users", "uploader", {"trusted": False})
+                await service.repo.update("users", "uploader", {"photo_trust": False})
             else:
                 await service.repo.update("recipes", "recipe", {"status": mutation})
         return result

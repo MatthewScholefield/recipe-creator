@@ -242,7 +242,7 @@ for (const admin of [false, true]) {
   test(`named profile menu binds server admin=${admin} without a separate login`, async ({page}) => {
     const verify = await mockApi(page, async (route, url) => {
       if (url.pathname !== '/api/session') return false;
-      await route.fulfill({json: {user: {id: 'user-1', display_name: 'Browser cook', state: 'active', trusted: false}, device_id: 'device-1', admin, csrf_token: 'browser-test'}});
+      await route.fulfill({json: {user: {id: 'user-1', display_name: 'Browser cook', state: 'active', photo_trusted: false}, device_id: 'device-1', admin, csrf_token: 'browser-test'}});
       return true;
     });
     await page.goto('/');

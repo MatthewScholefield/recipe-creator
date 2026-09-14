@@ -333,10 +333,8 @@ async def _database_command(args, settings):
             return report.as_dict()
         if args.command == "cleanup":
             from .photos import PhotoService
-            from .views import cleanup_view_tracking, utcnow
             await PhotoService(repo, settings).cleanup()
-            await cleanup_view_tracking(repo, utcnow())
-            return {"ok": True, "scope": "photo retention, interrupted uploads, media orphans and expired view tracking credentials/IP windows"}
+            return {"ok": True, "scope": "photo retention, interrupted uploads and media orphans"}
 
 
 def parser():
@@ -362,7 +360,7 @@ def parser():
             command.add_argument("--confirm-trusted-archive", action="store_true", required=True,
                                  help="I trust this SQL archive; checksums are not authentication. "
                                       "Set a NEW database name and absent media path in .env")
-    commands.add_parser("cleanup", help="Reconcile photo/media retention and expired view tracking data")
+    commands.add_parser("cleanup", help="Reconcile photo retention, interrupted uploads and orphan media")
     recent = commands.add_parser("admin-users", help="List recent active profiles (no credentials)")
     recent.add_argument("--limit", type=int, default=20)
     recent.add_argument("--q", default="")

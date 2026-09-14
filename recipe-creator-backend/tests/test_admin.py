@@ -19,7 +19,7 @@ async def login(browser):
 
 
 async def test_admin_users_reports_latest_device_activity(monkeypatch):
-    user = {"id": "user", "display_name": "Cook", "state": "active", "trusted": False}
+    user = {"id": "user", "display_name": "Cook", "state": "active", "photo_trust": False}
     older, latest = now() - timedelta(days=2), now() - timedelta(hours=2)
 
     class Repo:
@@ -77,9 +77,9 @@ async def test_admin_users_owner_revisions_restore_and_audit(identity_app):
         assert users["total"] == 1 and users["items"] == users["users"]
         observed = datetime.fromisoformat(users["items"][0]["last_login_at"].replace("Z", "+00:00"))
         assert observed == latest
-        patch = await browser.patch("/admin/users/" + user["id"], json={"trusted": True})
-        assert patch.json()["user"]["trusted"]
-        assert (await repo.get("users", user["id"]))["trusted"]
+        patch = await browser.patch("/admin/users/" + user["id"], json={"photo_trusted": True})
+        assert patch.json()["user"]["photo_trusted"]
+        assert (await repo.get("users", user["id"]))["photo_trust"]
         assigned = await browser.post(f"/admin/recipes/{recipe['id']}/owner", json={"owner_id": user["id"], "expected_revision": 1})
         assert assigned.status_code == 200, assigned.text
         current = await repo.save_recipe_revision(recipe["id"], assigned.json()["revision"], {"title": "Changed", "deleted_at": now()})
@@ -110,7 +110,7 @@ async def test_merge_transaction_idempotency_restrictions_usage_and_pagination(i
         source_id, target_id = source["user"]["id"], target["user"]["id"]
         pairing = (await source_browser.post("/pairings")).json()
         await login(browser)
-        await browser.patch("/admin/users/" + source_id, json={"state": "blocked", "trusted": True})
+        await browser.patch("/admin/users/" + source_id, json={"state": "blocked", "photo_trusted": True})
         timestamp = now()
         day = timestamp.date().isoformat()
         photo_target_key = "photo_attempt_" + digest(day + "\0user:" + target_id)
@@ -141,12 +141,12 @@ async def test_merge_transaction_idempotency_restrictions_usage_and_pagination(i
         assert body_preview.status_code == 200 and body_preview.json() == preview.json()
         assert (await browser.post("/admin/merge/preview", json={"source_id": source_id})).status_code == 422
         assert preview.json()["source"]["recipes"] == 3
-        assert preview.json()["result"] == {"state": "blocked", "trusted": False}
+        assert preview.json()["result"] == {"state": "blocked", "photo_trusted": False}
         body = {"source_id": source_id, "target_id": target_id, "confirm": True}
         merged = await browser.post("/admin/merge", json=body)
         assert merged.status_code == 200, merged.text
         assert merged.json()["user"]["state"] == "blocked"
-        assert not merged.json()["user"]["trusted"]
+        assert not merged.json()["user"]["photo_trusted"]
         assert (await repo.get("users", source_id))["merged_into"] == target_id
         assert not await repo.list("recipes", {"owner_id": source_id})
         assert len(await repo.list("recipes", {"owner_id": target_id})) == 3

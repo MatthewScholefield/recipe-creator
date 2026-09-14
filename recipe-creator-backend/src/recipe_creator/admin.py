@@ -11,7 +11,6 @@ from .jobs import enqueue_enrichment
 from .security import (
     all_rows, authorize, digest, now, public_user, record_id, require_admin, retry_transaction,
 )
-from .views import reconcile_merged_users
 
 
 router = APIRouter(prefix="/admin")
@@ -22,7 +21,7 @@ class Input(BaseModel):
 
 
 class UserInput(Input):
-    trusted: bool | None = None
+    photo_trusted: bool | None = None
     state: Literal["active", "blocked"] | None = None
 
 
@@ -88,8 +87,8 @@ async def update_user(user_id: str, body: UserInput, request: Request):
         if user.get("merged_into"):
             raise HTTPException(409, "Update the surviving profile")
         changes = {}
-        if body.trusted is not None:
-            changes["trusted"] = body.trusted
+        if body.photo_trusted is not None:
+            changes["photo_trust"] = body.photo_trusted
         if body.state is not None:
             changes["state"] = body.state
         result = await tx.update("users", user_id, changes)
@@ -151,7 +150,7 @@ async def restore(recipe_id: str, body: RestoreInput, request: Request):
             raise HTTPException(409, "Revision changed")
         excluded = {"id", "created_at", "updated_at", "revision", "owner_id", "deleted_at",
                     "admin", "is_admin", "trusted", "photo_trust", "photo_trusted", "author_name",
-                    "can_edit", "total_views", "unique_viewers", "idempotency_user_id", "idempotency_snapshot"}
+                    "can_edit", "idempotency_user_id", "idempotency_snapshot"}
         content = {key: value for key, value in revision["content"].items() if key not in excluded}
         try:
             validate_classifiers(content.get("tags", []))
@@ -201,7 +200,7 @@ async def merge_preview(request: Request, source_id: str, target_id: str):
             counts[table] = len(await all_rows(repo, table, {field: user["id"]}))
         profiles.append({"user": public_user(user), **counts})
     return {"source": profiles[0], "target": profiles[1],
-            "result": {"trusted": source["trusted"] and target["trusted"],
+            "result": {"photo_trusted": source["photo_trust"] and target["photo_trust"],
                        "state": "blocked" if "blocked" in {source["state"], target["state"]} else "active"}}
 
 
@@ -240,8 +239,7 @@ async def merge(body: MergeInput, request: Request):
         source, target = await merge_users(tx, source_id, target_id)
         if source.get("merged_into") == target_id:
             return {"user": public_user(target), "already_merged": True}
-        await reconcile_merged_users(tx, source, target)
-        restrictions = {"trusted": source["trusted"] and target["trusted"],
+        restrictions = {"photo_trust": source["photo_trust"] and target["photo_trust"],
                         "state": "blocked" if "blocked" in {source["state"], target["state"]} else "active"}
         target = await tx.update("users", target_id, restrictions)
         for table, field in (("recipes", "owner_id"), ("photos", "uploader_id"), ("devices", "user_id")):
@@ -250,7 +248,7 @@ async def merge(body: MergeInput, request: Request):
                 await tx.update(table, row["id"], {field: target_id})
         await invalidate_pairings(tx, user_ids=(source_id, target_id))
         await merge_usage(tx, source_id, target_id)
-        await tx.update("users", source_id, {"merged_into": target_id, "state": "merged", "trusted": False, "is_admin": False})
+        await tx.update("users", source_id, {"merged_into": target_id, "state": "merged", "photo_trust": False, "is_admin": False})
         await audit(tx, context, "user.merge", target_id, source_id=source_id, target_id=target_id, restrictions=restrictions)
         return {"user": public_user(target), "already_merged": False}
 

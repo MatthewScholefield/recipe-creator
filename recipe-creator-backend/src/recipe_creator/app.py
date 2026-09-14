@@ -18,13 +18,12 @@ from .photos import PhotoService
 from .repository import ConflictError, NotFoundError, Repository
 from .security import SecurityMiddleware, client_ip, get_context, rate_limit, require_user
 from .settings import Settings
-from .views import cleanup_view_tracking, utcnow as view_now
 
 
 configure_logging()
 
 
-async def cleanup_loop(photos, repo):
+async def cleanup_loop(photos):
     while True:
         try:
             await photos.cleanup()
@@ -32,12 +31,6 @@ async def cleanup_loop(photos, repo):
             raise
         except Exception as exc:
             logger.opt(exception=exc).error("Media cleanup failed")
-        try:
-            await cleanup_view_tracking(repo, view_now())
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.opt(exception=exc).error("View tracking cleanup failed")
         await asyncio.sleep(3600)
 
 
@@ -60,7 +53,7 @@ def create_app(settings: Settings | None = None, repo=None, run_jobs=True):
         try:
             if run_jobs:
                 await runner.start()
-                cleanup = asyncio.create_task(cleanup_loop(app.state.photos, database))
+                cleanup = asyncio.create_task(cleanup_loop(app.state.photos))
             yield
         finally:
             if cleanup:
