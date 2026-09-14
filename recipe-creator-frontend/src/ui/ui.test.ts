@@ -9,6 +9,7 @@ import Tag from './Tag.svelte';
 import IconButton from './IconButton.svelte';
 import TagPicker from './TagPicker.svelte';
 import Tooltip from './Tooltip.svelte';
+import Markdown from './Markdown.svelte';
 import { createRawSnippet, type Snippet } from 'svelte';
 const emptySnippet = (() => '') as unknown as Snippet;
 const customTrigger = createRawSnippet<[boolean]>(() => ({
@@ -77,6 +78,27 @@ it('shows tooltip text for keyboard focus', async () => {
 it('has a named reduced-motion-compatible spinner', () => {
   render(Spinner, {label: 'Organizing recipe'});
   expect(screen.getByRole('status', {name: 'Organizing recipe'})).toBeInTheDocument();
+});
+
+it('renders loosely spaced and suffixed direction steps as one ordered list', () => {
+  const source = [
+    '1. Mix the dry ingredients.',
+    '',
+    '2. Add the wet ingredients.',
+    '',
+    '4a. Add seasoning if desired.',
+    '',
+    '5. Chill the dough.'
+  ].join('\n');
+  const { container } = render(Markdown, { source });
+
+  expect(container.querySelectorAll('ol')).toHaveLength(1);
+  expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+    'Mix the dry ingredients.',
+    'Add the wet ingredients.',
+    'Add seasoning if desired.',
+    'Chill the dough.'
+  ]);
 });
 
 it('searches, creates, removes, and supports single tag selection', async () => {

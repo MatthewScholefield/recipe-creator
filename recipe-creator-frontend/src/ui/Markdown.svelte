@@ -105,7 +105,7 @@
   function listItem(line: string): { ordered: boolean; text: string } | undefined {
     const unordered = /^\s*[-+*]\s+(.+)$/.exec(line);
     if (unordered) return { ordered: false, text: unordered[1] };
-    const ordered = /^\s*\d+\.\s+(.+)$/.exec(line);
+    const ordered = /^\s*\d+[a-z]?\.\s+(.+)$/i.exec(line);
     if (ordered) return { ordered: true, text: ordered[1] };
   }
 
@@ -139,6 +139,11 @@
           if (!item || item.ordered !== firstItem.ordered) break;
           items.push(parseInline(item.text));
           index += 1;
+
+          let nextIndex = index;
+          while (nextIndex < lines.length && !lines[nextIndex].trim()) nextIndex += 1;
+          const nextItem = listItem(lines[nextIndex] ?? '');
+          if (nextItem?.ordered === firstItem.ordered) index = nextIndex;
         }
         blocks.push({ type: 'list', ordered: firstItem.ordered, items });
         continue;
