@@ -27,15 +27,20 @@ it('uses device wrappers and requests server-owned summaries for My recipes', as
   expect(await screen.findByRole('link',{name:/Soup/})).toBeInTheDocument(); expect(fetcher.mock.calls.some(([url]) => url === '/api/recipes?owner_id=u1&offset=0&limit=100')).toBe(true);
 });
 it('does not navigate after a publishing editor is unmounted', async () => {
-  let finish!: (value: unknown) => void;
-  const fetcher = mockApi(url => url === '/api/session' ? identity : url === '/api/recipes' ? new Promise(resolve => finish = resolve) : {});
+  const pending = (Promise as PromiseConstructor & {withResolvers<T>(): {promise: Promise<T>; resolve(value: T): void; reject(reason?: unknown): void}}).withResolvers<unknown>();
+  const fetcher = mockApi(url => url === '/api/session' ? identity : url === '/api/parse' ? recipe : url === '/api/recipes' ? pending.promise : {});
   const navigate = vi.fn(); const view = render(Editor,{navigate}); await awaitBlankEditor();
   await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Soup'}});
+  await fireEvent.input(screen.getByLabelText('Paste or write your recipe'),{target:{value:'2 cups stock\n\nSimmer.'}});
   await waitFor(() => expect(listDrafts()[0]).toBeDefined());
   const [local] = listDrafts(); expect(local).toBeDefined();
   navigate.mockClear();
   await fireEvent.click(screen.getByRole('button',{name:'Publish recipe'}));
-  await waitFor(() => expect(finish).toBeTypeOf('function')); view.unmount(); finish(recipe); await new Promise(resolve => setTimeout(resolve,20)); expect(navigate).not.toHaveBeenCalled();
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url === '/api/recipes')).toBe(true));
+  view.unmount();
+  pending.resolve(recipe);
+  await Promise.resolve();
+  expect(navigate).not.toHaveBeenCalled();
   expect(readDraft(local.id)?.draft.title).toBe('Soup');
   expect(listDrafts().map(draft => draft.id)).toEqual([local.id]);
   expect(fetcher.mock.calls.filter(([url]) => url === '/api/recipes')).toHaveLength(1);
@@ -67,13 +72,14 @@ it('discards a recovered edit without leaving the form disabled', async () => {
   expect(await screen.findByLabelText('Recipe title')).toHaveValue('Soup');
   expect(screen.getByText('Draft discarded. You are editing the current recipe.')).toBeInTheDocument();
 });
-it('keeps text publishable during a parser outage', async () => {
+it('keeps raw text unsaved when automatic organization fails', async () => {
   const fetcher = mockApi(url => url === '/api/session' ? identity : url === '/api/parse' ? new Response(JSON.stringify({detail:'AI unavailable'}),{status:503}) : {...recipe,id:'saved'});
-  const navigate = vi.fn(); render(Editor,{navigate}); await awaitBlankEditor(); await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Dinner'}}); await fireEvent.input(screen.getByLabelText('Paste or write your recipe'),{target:{value:'Original recipe'}}); await fireEvent.click(screen.getByRole('button',{name:'Organize'})); expect(await screen.findByRole('alert')).toHaveTextContent('Your text is safe'); expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue('Original recipe'); expect(screen.getByRole('button',{name:'Publish recipe'})).toBeEnabled();
+  const navigate = vi.fn(); render(Editor,{navigate}); await awaitBlankEditor(); await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Dinner'}}); await fireEvent.input(screen.getByLabelText('Paste or write your recipe'),{target:{value:'Original recipe'}});
   await fireEvent.click(screen.getByRole('button',{name:'Publish recipe'}));
-  await waitFor(() => expect(navigate).toHaveBeenCalledWith('/recipes/saved'));
-  const write = fetcher.mock.calls.find(([url]) => url === '/api/recipes');
-  expect(JSON.parse(write![1]!.body as string)).toMatchObject({mode:'text',source_text:'Original recipe'});
+  expect(await screen.findByRole('alert')).toHaveTextContent('Your text is safe');
+  expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue('Original recipe');
+  expect(fetcher.mock.calls.some(([url]) => url === '/api/recipes')).toBe(false);
+  expect(navigate).not.toHaveBeenCalled();
 });
 it('selects searchable merge profiles and invalidates an old preview', async () => {
   const candidates = ['Source','Target','Other'].map(display_name => ({...identity.user,id:display_name.toLowerCase(),display_name,last_login_at:null}));
@@ -94,17 +100,20 @@ it('browses summaries without a reactive request loop or identity creation', asy
   const fetcher = mockApi(url => url.includes('/tags') ? {tags:['dinner']} : {items:[{id:'r1',title:'Soup',description:'Warm',tags:['dinner'],author_name:null}],has_more:false,errors:[]});
   render(Browse,{query:''}); expect(await screen.findByRole('link',{name:'Soup'})).toBeInTheDocument(); await new Promise(resolve => setTimeout(resolve,30)); expect(fetcher).toHaveBeenCalledTimes(2); expect(fetcher.mock.calls.some(([url]) => String(url).includes('/session'))).toBe(false);
 });
-it('ignores a stale parse after typing and allows a text-only publish', async () => {
-  let resolveParse!: (value: unknown) => void;
-  const fetcher = mockApi(url => url === '/api/session' ? identity : url === '/api/parse' ? new Promise(resolve => resolveParse = resolve) : {...recipe,id:'saved'});
+it('ignores a stale manual parse and organizes the latest text on publish', async () => {
+  const firstParse = (Promise as PromiseConstructor & {withResolvers<T>(): {promise: Promise<T>; resolve(value: T): void; reject(reason?: unknown): void}}).withResolvers<unknown>();
+  let parseCount = 0;
+  const fetcher = mockApi(url => url === '/api/session' ? identity : url === '/api/parse' ? (++parseCount === 1 ? firstParse.promise : recipe) : {...recipe,id:'saved'});
   const navigate = vi.fn(); render(Editor,{navigate}); await awaitBlankEditor();
   await fireEvent.input(await screen.findByLabelText('Recipe title'),{target:{value:'Soup'}}); await fireEvent.input(screen.getByLabelText('Paste or write your recipe'),{target:{value:'Original'}});
-  await fireEvent.click(screen.getByRole('button',{name:'Organize'})); await waitFor(() => expect(resolveParse).toBeTypeOf('function'));
+  await fireEvent.click(screen.getByRole('button',{name:'Organize'}));
+  await waitFor(() => expect(parseCount).toBe(1));
   await fireEvent.input(screen.getByLabelText('Paste or write your recipe'),{target:{value:'Changed while parsing'}});
-  resolveParse({description:'Original',ingredient_groups:[],directions:'',notes:'',yield_amount:null,yield_unit:'',source_url:''});
+  firstParse.resolve({description:'Original',ingredient_groups:[],directions:'',notes:'',yield_amount:null,yield_unit:'',source_url:''});
   expect(await screen.findByText(/Result ignored/)).toBeInTheDocument(); expect(screen.getByLabelText('Paste or write your recipe')).toHaveValue('Changed while parsing');
   await fireEvent.click(screen.getByRole('button',{name:'Publish recipe'})); await waitFor(() => expect(navigate).toHaveBeenCalledWith('/recipes/saved'));
-  const write = fetcher.mock.calls.find(([url]) => url === '/api/recipes'); expect(JSON.parse(write![1]!.body as string).mode).toBe('text'); expect(JSON.parse(write![1]!.body as string).source_text).toBe('Changed while parsing');
+  const write = fetcher.mock.calls.find(([url]) => url === '/api/recipes')!;
+  expect(JSON.parse(write[1]!.body as string)).toMatchObject({mode:'structured',source_text:'Changed while parsing'});
 });
 it('cancels parsing without losing source text', async () => {
   let signal: AbortSignal | undefined;

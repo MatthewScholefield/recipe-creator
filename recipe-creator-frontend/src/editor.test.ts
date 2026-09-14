@@ -103,6 +103,24 @@ it('single ingredient inputs preserve untouched metadata; Enter inserts and focu
   const stored = readDraft(value.id)!; expect(stored.draft.ingredient_groups[0].ingredients[0]).toEqual(oldRow);
   const changed = stored.draft.ingredient_groups[0].ingredients[1]; expect(changed).toMatchObject({original_text:'  2 eggs ',quantity:null,grams:null,name:''}); expect(stored.ingredientLines?.[changed.id]).toBe('  2 eggs ');
 });
+it('organizes a raw recipe behind the save loader before publishing', async () => {
+  const value = localDraft();
+  const pending = (Promise as PromiseConstructor & {withResolvers<T>(): {promise: Promise<T>; resolve(value: T): void; reject(reason?: unknown): void}}).withResolvers<unknown>();
+  const fetcher = mockApi(url => url === '/api/parse' ? pending.promise : recipe);
+  const navigate = vi.fn();
+  render(Editor,{draftId:value.id,navigate});
+  const source = await screen.findByLabelText('Paste or write your recipe');
+  await waitFor(() => expect(screen.getByRole('button',{name:'Publish recipe'})).toBeEnabled());
+  await fireEvent.click(screen.getByRole('button',{name:'Publish recipe'}));
+  expect(screen.getByRole('status',{name:'Saving recipe…'})).toBeInTheDocument();
+  expect(source).toBeDisabled();
+  expect(source.closest('fieldset')).toHaveAttribute('aria-busy','true');
+  expect(fetcher.mock.calls.some(([url]) => url === '/api/recipes')).toBe(false);
+  pending.resolve(parseResult());
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith('/recipes/r1'));
+  const write = fetcher.mock.calls.find(([url]) => url === '/api/recipes')!;
+  expect(JSON.parse(write[1]!.body as string)).toMatchObject({mode:'structured',source_text:value.draft.source_text});
+});
 it('batches dirty lines at save, omits placeholders, and deletes only the successful draft', async () => {
   const value = localDraft(true), other = localDraft();
   const fetcher = mockApi((url, init) => url === '/api/ingredients/parse' ? lineResult(init!.body as string) : recipe);
@@ -136,7 +154,7 @@ it('requires explicit tag creation and blocks conflicting classifiers without re
   expect(screen.getByRole('button',{name:'Remove New tag'})).toBeInTheDocument(); expect(screen.getByRole('button',{name:'Publish recipe'})).toBeEnabled();
 });
 it('retains the same idempotency key across failed POST and retry', async () => {
-  const value = localDraft(); let count = 0;
+  const value = localDraft(true); let count = 0;
   const fetcher = mockApi(() => ++count === 1 ? new Response(JSON.stringify({detail:'Connection lost'}),{status:503}) : recipe);
   const navigate = vi.fn(); render(Editor,{draftId:value.id,navigate}); await screen.findByLabelText('Recipe title');
   await waitFor(() => expect(screen.getByRole('button',{name:'Publish recipe'})).toBeEnabled());
@@ -167,7 +185,7 @@ it('disables structured edits and shows progress beside the action while organiz
   pending.resolve(lineResult(body)); await waitFor(() => expect(input).toBeEnabled()); expect(input).toHaveValue('2 eggs');
 });
 it('locks edits during a save and ignores responses after teardown while retaining the draft', async () => {
-  const value = localDraft(); let finish!: (value: unknown) => void;
+  const value = localDraft(true); let finish!: (value: unknown) => void;
   mockApi(() => new Promise(resolve => finish = resolve)); const navigate = vi.fn();
   const view = render(Editor,{draftId:value.id,navigate}); await screen.findByLabelText('Recipe title');
   await waitFor(() => expect(screen.getByRole('button',{name:'Publish recipe'})).toBeEnabled());
@@ -176,7 +194,7 @@ it('locks edits during a save and ignores responses after teardown while retaini
   await new Promise(resolve => setTimeout(resolve,20)); expect(navigate).not.toHaveBeenCalled(); expect(readDraft(value.id)?.publishKey).toBe(value.publishKey);
 });
 it('shows the bottom name prompt after an expired-session save and keeps the draft', async () => {
-  const value = localDraft(); let expired = false;
+  const value = localDraft(true); let expired = false;
   vi.stubGlobal('fetch',vi.fn(async (url: string) => {
     if (url === '/api/session') return new Response(JSON.stringify(expired ? anonymous : identity));
     if (url === '/api/tags') return new Response(JSON.stringify({tags:[],classifier_tags:[]}));

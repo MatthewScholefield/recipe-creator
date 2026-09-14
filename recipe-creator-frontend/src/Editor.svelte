@@ -237,7 +237,21 @@
     if (invalidTags) { error = invalidTags; return null; }
     if (draft.source_url && !safeUrl(draft.source_url)) { error = 'The source link must begin with http:// or https://.'; return null; }
     if (!hasIdentity) return null;
-    if (draft.mode === 'structured') {
+    if (draft.mode === 'text') {
+      if (!draft.source_text.trim()) { error = 'Add recipe text before saving.'; return null; }
+      const snapshot = copy(draft);
+      try {
+        const result = await mutate<ParseResult>('/parse', {source_text: snapshot.source_text}, 'POST', signal);
+        if (!alive || !guard.accepts(version)) return null;
+        undo = snapshot;
+        undoLines = copy(dirty);
+        draft = applyParse(snapshot, result);
+        dirty = {};
+      } catch (e) {
+        if (guard.accepts(version)) error = `${message(e)} Your text is safe; try saving again.`;
+        return null;
+      }
+    } else {
       try { await previewLines(version, signal); }
       catch (e) { if (guard.accepts(version)) error = message(e); return null; }
     }
@@ -434,7 +448,7 @@
       {#if discard}<section class="notice"><p>Discard “{draftName}” from this device?</p><button onclick={discardDraft}>Discard draft</button><button onclick={() => discard = false}>Keep draft</button></section>{/if}
     {/if}
     <form onsubmit={(event) => {event.preventDefault(); void publish();}} oninput={changed}>
-      <fieldset class="editor-fields" disabled={busy || parsing || !!recovered} aria-busy={parsing}>
+      <fieldset class="editor-fields" disabled={busy || parsing || !!recovered} aria-busy={busy || parsing}>
         <label>Recipe title<input required maxlength="300" bind:value={draft.title}></label>
         {#if draft.mode === 'text'}
           <label>Paste or write your recipe<textarea class="source-editor" rows="20" maxlength="100000" bind:value={draft.source_text} placeholder="Ingredients, directions, and anything else you want to share"></textarea></label>
