@@ -132,7 +132,7 @@ def public_user(user):
     if user is None:
         return None
     return {"id": user["id"], "display_name": user["display_name"],
-            "state": user["state"], "photo_trusted": user["photo_trust"],
+            "state": user["state"], "trusted": user["trusted"],
             "merged_into": user.get("merged_into")}
 
 
@@ -150,16 +150,16 @@ def client_ip(request):
     return request.client.host if request.client else "unknown"
 
 
-async def retry_transaction(repo, operation):
-    for attempt in range(4):
+async def retry_transaction(repo, operation, attempts=4):
+    for attempt in range(attempts):
         try:
             async with repo.transaction() as tx:
                 result = await operation(tx)
             return result
         except ConflictError:
-            if attempt == 3:
+            if attempt == attempts - 1:
                 raise HTTPException(409, "Concurrent update; retry") from None
-            await asyncio.sleep(0.01 * (attempt + 1))
+            await asyncio.sleep(0.01 * (attempt + 1) + secrets.randbelow(6) / 1000)
 
 
 async def rate_limit(request, kind, limit, window=300):

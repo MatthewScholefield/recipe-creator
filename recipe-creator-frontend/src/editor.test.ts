@@ -6,10 +6,10 @@ import { clearSession } from './api';
 import { blank, changedIngredient, ingredient, recipeDraftFromRecipe } from './recipe';
 import { createDraft, listDrafts, readDraft, saveDraft } from './drafts';
 
-const identity = {user:{id:'u1',display_name:'Cook',state:'active',photo_trusted:false},device_id:'d1',admin:false,csrf_token:'csrf'};
+const identity = {user:{id:'u1',display_name:'Cook',state:'active',trusted:false},device_id:'d1',admin:false,csrf_token:'csrf'};
 const anonymous = {...identity,user:null,device_id:null};
 const oldRow = {...ingredient(),id:'legacy-row',original_text:'  ½ cup stock ',quantity:'0.5',unit:'cup',name:'stock',grams:{amount:120,estimated:true,basis:'legacy'}};
-const recipe = {...blank('structured'),id:'r1',title:'Soup',revision:2,owner_id:'u1',author_name:'Cook',can_edit:true,enrichment_status:'complete',directions:'  Simmer\n',ingredient_groups:[{id:'legacy-group',name:'',ingredients:[oldRow]}]};
+const recipe = {...blank('structured'),id:'r1',title:'Soup',revision:2,owner_id:'u1',author_name:'Cook',can_edit:true,enrichment_status:'complete',total_views:0,unique_viewers:0,directions:'  Simmer\n',ingredient_groups:[{id:'legacy-group',name:'',ingredients:[oldRow]}]};
 function mockApi(handler: (url: string, init?: RequestInit) => unknown | Promise<unknown>, named = true, currentIdentity = identity) {
   const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const path = String(url);

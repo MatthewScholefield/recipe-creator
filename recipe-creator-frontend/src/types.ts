@@ -19,6 +19,7 @@ export type SiteCopy = Schemas['SiteCopy'];
 export type SiteSettings = Schemas['SiteSettings'];
 export type TagCatalog = Schemas['TagCatalog'];
 export type RecipeListResponse = Schemas['RecipeListResponse'];
+export type RecipeViewCounts = Schemas['RecipeViewCounts'];
 export type IngredientLinesRequest = Schemas['IngredientLinesRequest'];
 export type IngredientLinesResult = Schemas['IngredientLinesResult'];
 export type RecipeLookupResponse = Schemas['RecipeLookupResponse'];

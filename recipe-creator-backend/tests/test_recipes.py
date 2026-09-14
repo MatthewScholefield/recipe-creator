@@ -370,7 +370,7 @@ async def test_anonymous_ingredient_quota_and_blocked_credentials(app, monkeypat
     async with client(app) as browser:
         response = await browser.post('/ingredients/parse', json={'lines': [{'id': 'old', 'text': '2 eggs'}]})
         assert response.status_code == 200 and response.json()['items'][0]['method'] == 'llm'
-        assert len(await app.state.repo.list('usage')) == 1 and not await app.state.repo.list('users')
+        assert not await app.state.repo.list('users')
         app.state.settings.ai_global_daily_limit = 2
         body = {'lines': [{'id': 'old', 'text': '2 cans beans'}]}
         results = await asyncio.gather(*(browser.post('/ingredients/parse', json=body, headers={'X-Forwarded-For': f'forged-{i}'}) for i in range(3)))

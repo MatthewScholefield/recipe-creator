@@ -14,14 +14,15 @@ from surreal_orm import Q, SurrealDBConnectionManager as Connections
 from . import ai
 from .ingredients import ingredient_hash
 from .jobs import enqueue_enrichment, enrichment_hash
-from .models import EnrichmentJob, Photo, Recipe as RecipeModel, User
+from .models import EnrichmentJob, Photo, Recipe as RecipeModel, RecipeViewStats, User
 from .photos import PUBLIC_FIELDS
 from surreal_sdk.protocol.cbor import RecordId
 from .schemas import (ParseRequest, ParseResult, Recipe, RecipeCatalogProjection, RecipeDraft,
                       RecipeIdProjection, RecipeUpdate, MEAL_CLASSIFIERS, tag_key, RecipeListResponse, TagCatalog,
-                      Tag, RecipeLookupRequest, RecipeLookupResponse, IngredientLinesRequest, IngredientLinesResult)
+                      Tag, RecipeLookupRequest, RecipeLookupResponse, IngredientLinesRequest, IngredientLinesResult,
+                      RecipeViewCounts)
 
-from .security import authorize, client_ip, get_context, now, rate_limit, require_user, retry_transaction
+from .security import authorize, client_ip, get_context, now, rate_limit, require_user, retry_transaction, set_cookie
 
 
 router = APIRouter()
@@ -90,6 +91,28 @@ def invalidate_catalog(repo):
     repo._recipe_catalog = None
     repo._recipe_search = {}
 
+async def attach_view_counts(repo, items):
+    if not items:
+        return items
+    await repo.connect()
+    counts = {}
+    ids = [item["id"] for item in items]
+    async with Connections.using(repo._name):
+        for start in range(0, len(ids), 1000):
+            chunk = ids[start:start + 1000]
+            rows = await RecipeViewStats.objects().select(
+                "id", "total_views", "unique_viewers"
+            ).filter(id__in=[RecordId("recipe_view_stats", recipe_id) for recipe_id in chunk]).limit(1000).exec()
+            for row in rows:
+                row = row if isinstance(row, dict) else repo._output(row)
+                counts[_id(row["id"], "recipe_view_stats")] = row
+    for item in items:
+        stats = counts.get(item["id"])
+        item["total_views"] = stats["total_views"] if stats else 0
+        item["unique_viewers"] = stats["unique_viewers"] if stats else 0
+    return items
+
+
 
 async def _catalog(repo):
     if not hasattr(repo, "_recipe_catalog_lock"):
@@ -99,9 +122,11 @@ async def _catalog(repo):
         if cached and cached[0] > monotonic():
             return cached[1]
         rows = await _project(repo, SUMMARY_FIELDS, RecipeCatalogProjection)
-        summaries = [row.model_dump() for row in rows]
+        summaries = await attach_view_counts(repo, [row.model_dump() for row in rows])
         order = {name: index for index, name in enumerate((*CATEGORIES, "Other"))}
-        summaries.sort(key=lambda item: (order[_group(item)], item["title"].lower(), item["id"]))
+        summaries.sort(key=lambda item: (
+            order[_group(item)], -item["total_views"], item["title"].lower(), item["id"]
+        ))
         repo._recipe_catalog = (monotonic() + 15, summaries)
         repo._recipe_search = {}
         return summaries
@@ -181,6 +206,7 @@ async def lookup_recipes(body: RecipeLookupRequest, request: Request):
         candidates.append({"id": recipe_id, "title": row.get("title", ""),
                            "description": row.get("description", "")[:300], "tags": row.get("tags", []),
                            "owner_id": row.get("owner_id"), "author_name": owner["display_name"] if owner else None})
+    await attach_view_counts(repo, candidates)
     catalog = await _catalog(repo) if body.q or body.tags else candidates
     items, _ = await filter_summaries(repo, catalog, body.q, body.tags, candidates=candidates, text_match_ids=text_matches)
     return {"items": await summary_thumbnails(request, items), "unavailable_ids": unavailable}
@@ -196,8 +222,14 @@ async def list_recipes(request: Request, response: Response, q: str = Query(defa
     catalog = await _catalog(repo)
     filtered, errors = await filter_summaries(repo, catalog, q, tag, owner_id)
     items = await summary_thumbnails(request, filtered[offset:offset + limit])
+    popular = []
+    if not q.strip() and not tag and owner_id is None:
+        qualifying = [item for item in catalog if item["total_views"] >= 6 and item["unique_viewers"] >= 2]
+        qualifying.sort(key=lambda item: (-item["total_views"], item["title"].lower(), item["id"]))
+        if len(qualifying) >= 3:
+            popular = await summary_thumbnails(request, qualifying[:3])
     return _revalidate(request, response, {"items": items, "offset": offset, "limit": limit, "total": len(filtered),
-            "has_more": offset + limit < len(filtered), "errors": errors,
+            "has_more": offset + limit < len(filtered), "errors": errors, "popular": popular,
             "groups": [{"name": name, "items": [item for item in items if _group(item) == name]}
                        for name in (*CATEGORIES, "Other") if any(_group(item) == name for item in items)]})
 
@@ -347,9 +379,12 @@ async def recipe_output(request, recipe, context=None):
     latest = (jobs[0] if isinstance(jobs[0], dict) else repo._output(jobs[0])) if jobs else None
     state = latest["state"] if latest else "none"
     photos = await _detail_photos(repo, recipe, context)
+    stats = await repo.get("recipe_view_stats", recipe["id"])
     return {**_draft_output(recipe), "id": recipe["id"], "revision": recipe["revision"],
             "owner_id": recipe.get("owner_id"), "author_name": owner["display_name"] if owner else None,
             "can_edit": _editable(recipe, context), "enrichment_status": "complete" if state == "succeeded" else state,
+            "total_views": stats["total_views"] if stats else 0,
+            "unique_viewers": stats["unique_viewers"] if stats else 0,
             "photos": [{**photo, "state": photo.get("state", photo.get("status", "pending")),
                         "can_delete": context.admin or bool(context.user and photo.get("uploader_id") == context.user["id"])} for photo in photos]}
 
@@ -369,6 +404,15 @@ async def get_recipe(request: Request, response: Response, recipe_id: str):
     recipe = await _recipe(request.app.state.repo, recipe_id)
     result = Recipe.model_validate(await recipe_output(request, recipe)).model_dump(mode="json")
     return _revalidate(request, response, result, private=True)
+
+
+@router.post("/recipes/{recipe_id}/views", response_model=RecipeViewCounts)
+async def create_recipe_view(request: Request, response: Response, recipe_id: str):
+    from .views import VIEWER_COOKIE, register_view
+    counts, cookie_secret, max_age = await register_view(request, recipe_id)
+    if cookie_secret:
+        set_cookie(response, request, VIEWER_COOKIE, cookie_secret, max_age)
+    return counts
 
 
 def _content(draft, previous=None):

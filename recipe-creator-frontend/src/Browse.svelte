@@ -11,23 +11,30 @@
   import Button from './ui/Button.svelte';
   import Spinner from './ui/Spinner.svelte';
   import RecipeCard from './RecipeCard.svelte';
-  import type { RecipeSummary } from './types';
+  import type { RecipeListResponse, RecipeSummary } from './types';
 
   type TagCatalog = {tags: string[]; classifier_tags?: string[]};
-  type ListResult = {items: RecipeSummary[]; has_more: boolean; errors?: string[]};
   type LookupResult = {items: RecipeSummary[]; unavailable_ids: string[]};
   let {query, selectedTags = [], savedOnly = false, onloadingchange}: {query: string; selectedTags?: string[]; savedOnly?: boolean; onloadingchange?: (loading: boolean) => void} = $props();
-  let items = $state<RecipeSummary[]>([]), tags = $state<string[]>([]), classifiers = $state<string[]>([...MEAL_CLASSIFIERS]);
+  let items = $state<RecipeSummary[]>([]), popular = $state<RecipeSummary[]>([]);
+  let tags = $state<string[]>([]), classifiers = $state<string[]>([...MEAL_CLASSIFIERS]);
   let more = $state(false), busy = $state(false), error = $state(''), warnings = $state<string[]>([]);
   let tagError = $state(''), drafts = $state<DraftSummary[]>([]);
   let savedProgress = $state({done: 0, total: 0}), unavailable = $state<string[]>([]), invalidBookmarks = $state(0);
-  let failedBatches = $state<number[]>([]), generation = 0, controller: AbortController | undefined;
+  let failedBatches = $state<number[]>([]), generation = 0, nextOffset = 0, controller: AbortController | undefined;
   const selected = $derived(uniqueTags(selectedTags));
   const active = $derived(Boolean(query || selected.length));
-  const visible = $derived(savedOnly ? items : [...items].sort((a, b) => a.title.localeCompare(b.title)));
+  const visible = $derived(items);
+  function rank(left: RecipeSummary, right: RecipeSummary) {
+    const leftTitle = left.title.toLocaleLowerCase('en'), rightTitle = right.title.toLocaleLowerCase('en');
+    return right.total_views - left.total_views || (leftTitle < rightTitle ? -1 : leftTitle > rightTitle ? 1 : 0)
+      || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+  }
   const groups = $derived(active || savedOnly
     ? [{name: savedOnly ? 'Saved recipes' : 'Results', items: visible}]
-    : [...classifiers, 'Other'].map(name => ({name, items: visible.filter(recipe => mealGroup(recipe.tags || [], classifiers) === name)})));
+    : [...classifiers, 'Other'].map(name => ({
+        name, items: visible.filter(recipe => mealGroup(recipe.tags || [], classifiers) === name).sort(rank)
+      })));
   const quickTags = $derived(tags.filter(tag => !selected.some(value => value.localeCompare(tag, undefined, {sensitivity: 'accent'}) === 0)).slice(0, 6));
 
   function clipQuickTags(node: HTMLDivElement, _tags: string[]) {
@@ -62,12 +69,23 @@
   async function fetchPage(reset = false) {
     const token = ++generation, signal = requestSignal().signal;
     busy = true; error = '';
-    if (reset) {items = []; warnings = []; more = false;}
-    const offset = reset ? 0 : items.length;
+    if (reset) {items = []; popular = []; warnings = []; more = false; nextOffset = 0;}
+    const offset = reset ? 0 : nextOffset;
     try {
-      const result = await request<ListResult>(recipePath(offset), {signal});
+      const result = await request<RecipeListResponse>(recipePath(offset), {signal});
       if (token !== generation) return;
-      items = reset ? result.items : [...items, ...result.items];
+      if (reset) items = result.items;
+      else {
+        const merged = [...items], positions = new Map(merged.map((item, index) => [item.id, index]));
+        for (const item of result.items) {
+          const position = positions.get(item.id);
+          if (position === undefined) {positions.set(item.id, merged.length); merged.push(item);}
+          else merged[position] = item;
+        }
+        items = merged;
+      }
+      popular = result.popular || [];
+      nextOffset = result.offset + result.items.length;
       more = result.has_more; warnings = result.errors || [];
     } catch (reason) { if (token === generation) error = message(reason); }
     finally { if (token === generation) busy = false; }
@@ -147,6 +165,9 @@
 {#if savedOnly && (invalidBookmarks || unavailable.length)}<div class="notice" role="status">{#if invalidBookmarks}{invalidBookmarks} invalid bookmark{invalidBookmarks === 1 ? '' : 's'} could not be loaded. {/if}{#if unavailable.length}{unavailable.length} saved recipe{unavailable.length === 1 ? ' is' : 's are'} unavailable. <button type="button" onclick={removeUnavailable}>Remove unavailable</button>{/if}</div>{/if}
 {#if savedOnly && busy}<p role="status"><Spinner size={16} /> Loading saved recipes ({savedProgress.done} of {savedProgress.total})…</p>{/if}
 
+{#if !active && !savedOnly && popular.length}
+<section class="recipe-group"><h2>Popular</h2><div class="cards">{#each popular as recipe (recipe.id)}<RecipeCard title={recipe.title} href={`/recipes/${encodeURIComponent(recipe.id)}`} description={recipe.description} thumbnailPhotoId={recipe.thumbnail_photo_id} />{/each}</div></section>
+{/if}
 {#each groups as group}{#if group.items.length}<section class="recipe-group"><h2>{group.name}</h2><div class="cards">{#each group.items as recipe (recipe.id)}<RecipeCard title={recipe.title} href={`/recipes/${encodeURIComponent(recipe.id)}`} description={recipe.description} thumbnailPhotoId={recipe.thumbnail_photo_id} />{/each}</div></section>{/if}{/each}
 {#if busy && !savedOnly}<p role="status"><Spinner size={16} /> Loading recipes…</p>{:else if !visible.length && !busy && !error}<div class="empty"><h2>{savedOnly ? 'No saved recipes' : active ? 'No matching recipes' : 'No recipes yet'}</h2><p>{savedOnly ? 'Save recipes to this device to find them here.' : active ? 'Try a different search or filter.' : 'Add the first recipe when you are ready.'}</p>{#if active}<button type="button" onclick={clearFilters}>Clear filters</button>{:else if !savedOnly}<Button variant="primary" size="sm" href="/new"><Icon name="plus" size={18} /> Add recipe</Button>{/if}</div>{/if}
 {#if savedOnly && failedBatches.length}<p class="notice" role="status">Some saved recipes could not be loaded. <button type="button" onclick={() => void loadSaved(failedBatches)}>Retry failed requests</button></p>{/if}
