@@ -151,26 +151,40 @@ async def test_organizes_new_recipe_once_and_preserves_edits(legacy, parse_calls
     assert not (await import_recipes(repo, [legacy], Settings())).ok
 
 
-async def test_organization_failure_keeps_the_whole_import_unwritten(legacy, parse_calls, monkeypatch):
+async def test_organization_failures_import_successes_and_retry_skips_them(
+    legacy, parse_calls, monkeypatch
+):
     successful = ai.parse_recipe
     attempted = 0
 
-    async def fail_second(source, settings):
+    async def fail_after_first(source, settings):
         nonlocal attempted
         attempted += 1
-        if attempted == 2:
+        if attempted > 1:
             raise RuntimeError("provider failed")
         return await successful(source, settings)
 
-    monkeypatch.setattr(ai, "parse_recipe", fail_second)
+    monkeypatch.setattr(ai, "parse_recipe", fail_after_first)
     second = {**legacy, "uuid": "aa742473-9947-4203-91d2-7495f5bd3b37", "title": "Second"}
+    third = {**legacy, "uuid": "56e8c38d-e37f-4076-bde2-a9ce5830d7bb", "title": "Third"}
     repo = MemoryRepository()
-    report = await import_recipes(repo, [legacy, second], Settings())
+    report = await import_recipes(repo, [legacy, second, third], Settings())
     assert not report.ok
-    assert report.errors == [f"Recipe {second['uuid']}: organization failed"]
-    assert attempted == 2
-    assert not repo.rows["recipes"]
-    assert not repo.rows["revisions"]
+    assert report.created == [legacy["uuid"]]
+    assert report.organization_failures == [
+        {"id": second["uuid"], "title": "Second"},
+        {"id": third["uuid"], "title": "Third"},
+    ]
+    assert list(repo.rows["recipes"]) == [legacy["uuid"]]
+    assert list(repo.rows["revisions"]) == [f"legacy-{legacy['uuid']}"]
+
+    monkeypatch.setattr(ai, "parse_recipe", successful)
+    retried = await import_recipes(repo, [legacy, second, third], Settings())
+    assert retried.ok
+    assert retried.unchanged == [legacy["uuid"]]
+    assert retried.created == [second["uuid"], third["uuid"]]
+    assert len(parse_calls) == 3
+    assert set(repo.rows["recipes"]) == {legacy["uuid"], second["uuid"], third["uuid"]}
 
 
 async def test_category_order_change_is_conflict(legacy, parse_calls):

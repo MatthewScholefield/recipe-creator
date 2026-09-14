@@ -115,11 +115,12 @@ class ImportReport:
     unchanged: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    organization_failures: list[dict[str, str]] = field(default_factory=list)
     dry_run: bool = False
 
     @property
     def ok(self):
-        return not self.errors and not self.conflicts
+        return not self.errors and not self.conflicts and not self.organization_failures
 
     def as_dict(self):
         return {**asdict(self), "ok": self.ok}
@@ -128,10 +129,11 @@ class ImportReport:
 async def import_recipes(
     repo: Repository, records: list[dict], settings: Settings, *, dry_run=False
 ) -> ImportReport:
-    """Validate the snapshot, organize new recipes, then insert recipe/history atomically.
+    """Validate the snapshot, organize new recipes, then atomically insert successes.
 
     Existing records are compared to immutable import history, not current edited
-    content. Conflicts abort the entire import; repeat runs never overwrite edits.
+    content. Repeat runs never overwrite edits, and one organization failure does
+    not discard other successfully organized recipes.
     """
     report = ImportReport(total=len(records), dry_run=dry_run)
     candidates = {}
@@ -179,11 +181,13 @@ async def import_recipes(
         *(organize(identifier) for identifier in report.would_create)
     ):
         if error is not None:
-            report.errors.append(f"Recipe {identifier}: organization failed")
+            report.organization_failures.append({
+                "id": identifier,
+                "title": candidates[identifier]["title"],
+            })
+            report.would_create.remove(identifier)
         else:
             organized[identifier] = data
-    if report.errors:
-        return report
 
     try:
         async with repo.transaction() as tx:
@@ -201,7 +205,7 @@ async def import_recipes(
                     report.unchanged.append(identifier)
                 else:
                     report.conflicts.append(identifier)
-            if not report.ok:
+            if report.conflicts:
                 return report
             for identifier in ready:
                 data = organized[identifier]
