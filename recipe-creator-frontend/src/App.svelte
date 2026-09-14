@@ -17,7 +17,7 @@
   let route = $state(location.pathname + location.search);
   let pairingVersion = $state(0);
   let pairingToken = $state(''), naming = $state(false), identityError = $state('');
-  let search = $state(new URLSearchParams(location.search).get('q') || '');
+  let search = $state(new URLSearchParams(location.search).get('q') || ''), resultsLoading = $state(false);
   function readRoute() { route = location.pathname + location.search; search = new URLSearchParams(location.search).get('q') || ''; }
   function navigate(path: string, options?: {replace?: boolean}) { if (options?.replace) history.replaceState({}, '', path); else history.pushState({}, '', path); readRoute(); window.scrollTo({top: 0}); }
   async function loadIdentity() {identityError = ''; try {await refreshIdentity();} catch(error) {identityError = message(error);} }
@@ -36,12 +36,26 @@
   const recipeId = $derived(recipeMatch ? decodeURIComponent(recipeMatch[1]) : undefined);
   const draftId = $derived(params.get('draft') ?? undefined);
   const user = $derived(appState.identity?.user);
+  const routeSearch = $derived(params.get('q') || '');
+  const searchPending = $derived(search !== routeSearch || resultsLoading);
+  function submitSearch() {
+    resultsLoading = true;
+    navigate(browseUrl({q: search, tags: params.getAll('tag'), saved: pathname === '/saved'}));
+  }
+  function setResultsLoading(loading: boolean) { resultsLoading = loading; }
+  $effect(() => {
+    search; routeSearch;
+    if (search === routeSearch) return;
+    const timer = window.setTimeout(submitSearch, 350);
+    return () => window.clearTimeout(timer);
+  });
 </script>
 <a class="skip" href="#main">Skip to recipes</a>
 <header class="site-header">
   <a class="brand" href="/">{appState.copy.site_title}{#if appState.copy.site_tagline}<span>{appState.copy.site_tagline}</span>{/if}</a>
-  <form class="search" onsubmit={(event) => {event.preventDefault(); navigate(browseUrl({q: search, tags: params.getAll('tag'), saved: pathname === '/saved'}));}}>
-    <label class="sr-only" for="search">Search recipes</label><input id="search" type="search" bind:value={search} placeholder="Search recipes"><button aria-label="Search recipes"><Icon name="search" /></button>
+  <form class="search" role="search" onsubmit={(event) => {event.preventDefault(); submitSearch();}}>
+    <span class="search-indicator">{#if searchPending}<Spinner label="Searching recipes" size={18} />{:else}<Icon name="search" size={18} />{/if}</span>
+    <label class="sr-only" for="search">Search recipes</label><input id="search" type="search" bind:value={search} placeholder="Search recipes" autocomplete="off">
   </form>
   <nav aria-label="Main"><Button variant="primary" size="sm" href="/new"><Icon name="plus" size={18} /> Add recipe</Button><IconButton href="/saved" ariaLabel="Saved recipes" title="Saved recipes"><Icon name="bookmark" size={18} /></IconButton></nav>
   <div class="profile-menu">
@@ -57,7 +71,7 @@
 {#if identityError}<p class="notice" role="status">Profile could not be loaded. {identityError} <button type="button" onclick={() => void loadIdentity()}>Retry profile</button></p>{/if}
 <main id="main" tabindex="-1">
   {#key pathname}
-    {#if pathname === '/' || pathname === '/saved'}<Browse query={params.get('q') || ''} selectedTags={params.getAll('tag')} savedOnly={pathname === '/saved'} />
+    {#if pathname === '/' || pathname === '/saved'}<Browse query={routeSearch} selectedTags={params.getAll('tag')} savedOnly={pathname === '/saved'} onloadingchange={setResultsLoading} />
     {:else if pathname === '/new' || recipeMatch?.[2]}
       {#key `${recipeId || ''}:${draftId || ''}`}{#await import('./Editor.svelte')}<Spinner label="Loading editor" />{:then {default: Editor}}<Editor {recipeId} {draftId} {navigate} />{:catch}<p role="alert">Could not load the editor. Reload to try again.</p>{/await}{/key}
     {:else if recipeId}<Detail {recipeId} {navigate} />
@@ -70,6 +84,7 @@
 </main>
 {#if appState.copy.footer_text}<footer>{appState.copy.footer_text}</footer>{/if}
 <style>
+  .search{position:relative;align-items:center}.search-indicator{position:absolute;left:.85rem;z-index:1;display:inline-flex;color:var(--muted);pointer-events:none}.search input{width:100%;padding-left:2.55rem;border-radius:999px;background:var(--paper);box-shadow:0 1px 2px rgb(32 63 44/.06)}.search input:focus{border-color:var(--green);box-shadow:0 0 0 3px rgb(53 91 67/.14)}
   .profile-menu{margin-left:auto}.profile-menu :global(button){display:flex;align-items:center;gap:.4rem}.anonymous{color:var(--ui-text-muted,#666)}
   @media(max-width:600px){.profile-menu :global(button span){max-width:8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 </style>

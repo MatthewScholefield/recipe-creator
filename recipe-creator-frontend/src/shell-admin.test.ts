@@ -93,6 +93,29 @@ it('shows anonymous profile menu and preserves saved search tag parameters', asy
   await fireEvent.input(screen.getByRole('searchbox',{name:'Search recipes'}),{target:{value:'soup'}}); await fireEvent.submit(screen.getByRole('searchbox',{name:'Search recipes'}).closest('form')!);
   expect(location.pathname).toBe('/saved'); expect(new URLSearchParams(location.search).getAll('tag')).toEqual(['dinner','vegan']); expect(new URLSearchParams(location.search).get('q')).toBe('soup');
 });
+it('debounces header searches and keeps a loader visible until matching results arrive', async () => {
+  vi.stubGlobal('scrollTo',vi.fn());
+  const pending = (Promise as PromiseConstructor & {withResolvers<T>(): {promise: Promise<T>; resolve(value: T): void}}).withResolvers<unknown>();
+  const fetcher = mockApi(url => {
+    if (url === '/api/session') return {...identity,user:null,admin:false};
+    if (url === '/api/site-settings') return {revision:0,copy:DEFAULT_SITE_COPY};
+    if (url === '/api/tags') return {tags:[],classifier_tags:[]};
+    if (url.includes('/api/recipes?q=soup')) return pending.promise;
+    return {items:[{id:'old',title:'Old result',description:'',tags:[],thumbnail_photo_id:null}],has_more:false,errors:[]};
+  });
+  render(App);
+  await screen.findByRole('link',{name:'Old result'});
+  expect(screen.queryByRole('button',{name:'Search recipes'})).not.toBeInTheDocument();
+  const input = screen.getByRole('searchbox',{name:'Search recipes'});
+  await fireEvent.input(input,{target:{value:'soup'}});
+  expect(screen.getByLabelText('Searching recipes')).toBeInTheDocument();
+  expect(screen.getByRole('link',{name:'Old result'})).toBeInTheDocument();
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url).includes('/api/recipes?q=soup'))).toBe(true));
+  expect(screen.getByLabelText('Searching recipes')).toBeInTheDocument();
+  pending.resolve({items:[{id:'soup',title:'Soup result',description:'',tags:[],thumbnail_photo_id:null}],has_more:false,errors:[]});
+  await screen.findByRole('link',{name:'Soup result'});
+  await waitFor(() => expect(screen.queryByLabelText('Searching recipes')).not.toBeInTheDocument());
+});
 it('remounts the editor when only the draft query changes', async () => {
   const first = createDraft('First'), second = createDraft('Second'); first.draft.title = 'First recipe'; second.draft.title = 'Second recipe'; saveDraft(first); saveDraft(second);
   history.replaceState({}, '', draftHref(first.id));

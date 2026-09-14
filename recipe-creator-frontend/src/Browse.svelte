@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick, untrack } from 'svelte';
+  import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { request, message } from './api';
   import { load, save } from './local';
   import { bookmarkIds, browseUrl, mealGroup, MEAL_CLASSIFIERS, uniqueTags } from './browse-query';
@@ -16,7 +16,7 @@
   type TagCatalog = {tags: string[]; classifier_tags?: string[]};
   type ListResult = {items: RecipeSummary[]; has_more: boolean; errors?: string[]};
   type LookupResult = {items: RecipeSummary[]; unavailable_ids: string[]};
-  let {query, selectedTags = [], savedOnly = false}: {query: string; selectedTags?: string[]; savedOnly?: boolean} = $props();
+  let {query, selectedTags = [], savedOnly = false, onloadingchange}: {query: string; selectedTags?: string[]; savedOnly?: boolean; onloadingchange?: (loading: boolean) => void} = $props();
   let items = $state<RecipeSummary[]>([]), tags = $state<string[]>([]), classifiers = $state<string[]>([...MEAL_CLASSIFIERS]);
   let more = $state(false), busy = $state(false), error = $state(''), warnings = $state<string[]>([]);
   let tagError = $state(''), drafts = $state<DraftSummary[]>([]);
@@ -119,6 +119,8 @@
     untrack(() => { if (savedOnly) void loadSaved(); else void fetchPage(true); });
     return () => { generation++; controller?.abort(); };
   });
+  $effect(() => onloadingchange?.(busy));
+  onDestroy(() => onloadingchange?.(false));
   onMount(() => {
     drafts = listDrafts();
     const unsubscribe = subscribeDrafts(() => drafts = listDrafts());
