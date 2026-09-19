@@ -44,6 +44,8 @@ just admin-grant --user-id <user-id> --yes
 
 ## Production deployment
 
+For a reproducible systemd/nginx installation with blue/green releases and coordinated automatic migrations, see [the bare-metal deployment guide](deployment/bare-metal.md).
+
 Migration `0004_recipe_views` changes the stored user trust field and creates the view-tracking tables. Use a maintenance window; old and new application processes must not write the database at the same time:
 
 1. Stop every API process, job runner, importer, and other database writer.
