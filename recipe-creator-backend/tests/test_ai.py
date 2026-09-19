@@ -320,7 +320,7 @@ async def test_timeout_and_concurrency():
         active += 1
         maximum = max(maximum, active)
         try:
-            await asyncio.sleep(.02)
+            await asyncio.sleep(.1)
             return ModelResponse(
                 parts=[ToolCallPart(info.output_tools[0].name, output())]
             )
@@ -332,6 +332,10 @@ async def test_timeout_and_concurrency():
             *(parse_recipe("x", Settings(ai_concurrency=1)) for _ in range(3))
         )
         assert maximum == 1
+        await asyncio.gather(
+            *(parse_recipe("x", Settings(ai_concurrency=1, ai_timeout_seconds=.18))
+              for _ in range(2))
+        )
         with pytest.raises(TimeoutError):
             await parse_recipe("x", Settings(ai_timeout_seconds=.001))
     assert active == 0

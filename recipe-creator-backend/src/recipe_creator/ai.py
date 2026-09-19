@@ -166,8 +166,8 @@ async def parse_recipe(source_text: str, settings: Settings) -> dict:
     """Return the model-organized recipe fields."""
     request = ParseRequest(source_text=source_text)
     model, semaphore = _runtime(settings)
-    async with asyncio.timeout(settings.ai_timeout_seconds):
-        async with semaphore:
+    async with semaphore:
+        async with asyncio.timeout(settings.ai_timeout_seconds):
             async with parser_agent.run_stream_events(
                 json.dumps(request.model_dump(), ensure_ascii=False),
                 model=model,
