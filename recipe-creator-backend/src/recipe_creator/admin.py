@@ -24,6 +24,7 @@ class Input(BaseModel):
 class UserInput(Input):
     trusted: bool | None = None
     state: Literal["active", "blocked"] | None = None
+    is_admin: Literal[True] | None = None
 
 
 class OwnerInput(Input):
@@ -60,10 +61,13 @@ async def audit(tx, context, action, target, **data):
 async def users(request: Request, q: str = Query(default="", max_length=100), start: int = Query(default=0, ge=0), limit: int = Query(default=20, ge=1, le=500), eligible_owner: bool = False, eligible_merge: bool = False):
     await require_admin(request)
     rows = await all_rows(request.app.state.repo, "users")
+    merged_children = {}
+    for row in rows:
+        if row.get("merged_into"):
+            merged_children.setdefault(row["merged_into"], []).append(row["id"])
+    rows = [row for row in rows if row["state"] != "merged" and not row.get("merged_into")]
     if eligible_owner:
-        rows = [row for row in rows if row["state"] == "active" and not row.get("merged_into")]
-    elif eligible_merge:
-        rows = [row for row in rows if row["state"] != "merged" and not row.get("merged_into")]
+        rows = [row for row in rows if row["state"] == "active"]
     rows.sort(key=lambda row: (row["display_name"].casefold(), row["id"]))
     rows = [row for row in rows if q.casefold() in row["display_name"].casefold() or q.casefold() in row["id"].casefold()]
     devices = await all_rows(request.app.state.repo, "devices")
@@ -72,7 +76,19 @@ async def users(request: Request, q: str = Query(default="", max_length=100), st
         user_id, timestamp = device.get("user_id"), device.get("last_used_at")
         if user_id and timestamp and (user_id not in last_login or timestamp > last_login[user_id]):
             last_login[user_id] = timestamp
-    items = [{**public_user(row), "last_login_at": last_login.get(row["id"])} for row in rows[start:start + limit]]
+    items = []
+    for row in rows[start:start + limit]:
+        merged_ids, seen = [], {row["id"]}
+        pending = list(merged_children.get(row["id"], ()))
+        while pending:
+            merged_id = pending.pop()
+            if merged_id in seen:
+                continue
+            seen.add(merged_id)
+            merged_ids.append(merged_id)
+            pending.extend(merged_children.get(merged_id, ()))
+        items.append({**public_user(row), "is_admin": row.get("is_admin", False),
+                      "merged_user_ids": sorted(merged_ids), "last_login_at": last_login.get(row["id"])})
     return {"items": items, "users": items, "total": len(rows), "start": start, "limit": limit, "has_more": start + limit < len(rows)}
 
 
@@ -85,17 +101,24 @@ async def update_user(user_id: str, body: UserInput, request: Request):
         user = await tx.get("users", user_id)
         if not user:
             raise HTTPException(404, "User not found")
-        if user.get("merged_into"):
+        if user.get("merged_into") or user["state"] == "merged":
             raise HTTPException(409, "Update the surviving profile")
         changes = {}
         if body.trusted is not None:
             changes["trusted"] = body.trusted
         if body.state is not None:
             changes["state"] = body.state
+        if body.is_admin is True:
+            if user["state"] != "active" or body.state == "blocked":
+                raise HTTPException(422, "Select an active, unmerged profile")
+            changes["is_admin"] = True
         result = await tx.update("users", user_id, changes)
         if result["state"] == "blocked":
             await invalidate_pairings(tx, user_ids=(user_id,))
         await audit(tx, context, "user.update", user_id, changes=changes)
+        if body.is_admin is True:
+            await audit(tx, context, "user.admin.grant", user_id,
+                        previous_is_admin=user.get("is_admin", False), is_admin=True)
         return result
 
     return {"user": public_user(await retry_transaction(request.app.state.repo, update))}

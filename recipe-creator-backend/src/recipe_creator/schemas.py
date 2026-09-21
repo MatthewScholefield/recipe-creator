@@ -236,6 +236,8 @@ class PublicUser(BaseModel):
 
 class AdminUser(PublicUser):
     last_login_at: datetime | None = None
+    is_admin: bool = False
+    merged_user_ids: list[str] = Field(default_factory=list)
 
 
 class SessionResponse(BaseModel):

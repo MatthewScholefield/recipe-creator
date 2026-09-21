@@ -198,7 +198,7 @@ async def test_owner_revision_one_race_eligibility_restore_and_rollback(identity
         merged = await repo.create('users', {'display_name': 'Duplicate', 'state': 'merged', 'merged_into': target['id']})
         directory = (await browser.get('/admin/users?q=duplicate&eligible_owner=true&limit=1')).json()
         assert directory['total'] == 1 and directory['items'][0]['id'] == target['id'] and not directory['has_more']
-        assert not {'is_admin', 'secret_hash', 'payload'} & directory['items'][0].keys()
+        assert not {'secret_hash', 'payload'} & directory['items'][0].keys()
         recipe = (await browser.post('/recipes', json={'title': 'Original', 'source_text': 'Exact\r\nprose'})).json()
         rid = recipe['id']
         url = f'/admin/recipes/{rid}/owner'
@@ -260,3 +260,123 @@ async def test_admin_photo_moderation_delegates_and_audits(identity_app):
         assert result.status_code == 200, result.text
         assert (await repo.get("photos", photo["id"]))["status"] == "approved"
         assert len(await repo.list("audit", {"action": "photo.moderate"})) == 1
+
+
+@pytest.mark.integration
+async def test_admin_grant_requires_admin_csrf_and_updates_live_session(identity_app):
+    repo = identity_app.state.repo
+    async with client(identity_app) as operator, client(identity_app) as member, client(identity_app) as anonymous:
+        target = (await profile(member, "New admin"))["user"]
+        url = "/admin/users/" + target["id"]
+        await csrf(anonymous)
+        assert (await anonymous.patch(url, json={"is_admin": True})).status_code == 401
+        assert (await member.patch(url, json={"is_admin": True})).status_code == 403
+        await login(operator)
+        operator_session = (await operator.get("/session")).json()
+        assert (await operator.patch(url, json={"is_admin": True},
+                                     headers={"X-CSRF-Token": "bad"})).status_code == 403
+        assert not (await repo.get("users", target["id"]))["is_admin"]
+        assert not await repo.list("audit", {"action": "user.admin.grant"})
+        assert not (await member.get("/session")).json()["admin"]
+
+        promoted = await operator.patch(url, json={"is_admin": True, "trusted": True})
+        assert promoted.status_code == 200, promoted.text
+        persisted = await repo.get("users", target["id"])
+        assert persisted["is_admin"] and persisted["trusted"]
+        assert (await member.get("/session")).json()["admin"]
+        listing = await member.get("/admin/users", params={"q": target["id"]})
+        assert listing.status_code == 200, listing.text
+        assert listing.json()["items"][0]["is_admin"]
+        events = await repo.list("audit", {"action": "user.admin.grant"})
+        assert len(events) == 1
+        event = events[0]
+        assert event["target"] == target["id"]
+        assert event["actor_id"] == operator_session["user"]["id"]
+        assert event["device_id"] == operator_session["device_id"]
+        assert event["previous_is_admin"] is False and event["is_admin"] is True
+        assert (await operator.patch(url, json={"is_admin": False})).status_code == 422
+        assert (await member.get("/session")).json()["admin"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("state", "merged", "requested_state", "status"), [
+    ("blocked", False, None, 422),
+    ("blocked", False, "active", 422),
+    ("active", False, "blocked", 422),
+    ("merged", True, None, 409),
+    ("active", True, None, 409),
+    ("merged", False, None, 409),
+])
+async def test_admin_grant_rejects_ineligible_profiles(identity_app, state, merged, requested_state, status):
+    repo = identity_app.state.repo
+    survivor = await repo.create("users", {"display_name": "Survivor"})
+    target = await repo.create("users", {"display_name": "Ineligible", "state": state,
+                                         "merged_into": survivor["id"] if merged else None})
+    async with client(identity_app) as browser:
+        await login(browser)
+        body = {"is_admin": True, "trusted": True}
+        if requested_state:
+            body["state"] = requested_state
+        result = await browser.patch("/admin/users/" + target["id"], json=body)
+        assert result.status_code == status, result.text
+        persisted = await repo.get("users", target["id"])
+        assert not persisted["is_admin"] and not persisted["trusted"]
+        assert persisted["state"] == state
+        assert not await repo.list("audit", {"target": target["id"]})
+
+
+@pytest.mark.integration
+async def test_admin_grant_rolls_back_when_audit_fails(identity_app, monkeypatch):
+    repo = identity_app.state.repo
+    target = await repo.create("users", {"display_name": "Candidate"})
+    original_audit = admin.audit
+
+    async def fail_grant_audit(tx, context, action, target, **data):
+        if action == "user.admin.grant":
+            raise RuntimeError("audit unavailable")
+        await original_audit(tx, context, action, target, **data)
+
+    monkeypatch.setattr(admin, "audit", fail_grant_audit)
+    async with client(identity_app) as browser:
+        await login(browser)
+        with pytest.raises(RuntimeError, match="audit unavailable"):
+            await browser.patch("/admin/users/" + target["id"], json={"is_admin": True, "trusted": True})
+        persisted = await repo.get("users", target["id"])
+        assert not persisted["is_admin"] and not persisted["trusted"]
+        assert not await repo.list("audit", {"target": target["id"]})
+
+
+@pytest.mark.integration
+async def test_admin_directory_hides_merged_profiles_and_keeps_transitive_ids(identity_app):
+    repo = identity_app.state.repo
+    async with client(identity_app) as browser:
+        await login(browser)
+        ancestor = await repo.create("users", {"display_name": "Directory A"})
+        intermediate = await repo.create("users", {"display_name": "Directory B"})
+        survivor = await repo.create("users", {"display_name": "Directory C", "is_admin": True})
+        blocked = await repo.create("users", {"display_name": "Directory D", "state": "blocked"})
+        for source, target in [(ancestor, intermediate), (intermediate, survivor)]:
+            response = await browser.post("/admin/merge", json={
+                "source_id": source["id"], "target_id": target["id"], "confirm": True,
+            })
+            assert response.status_code == 200, response.text
+        await repo.create("users", {"display_name": "Directory orphan", "state": "merged"})
+        await repo.create("users", {"display_name": "Directory linked", "merged_into": blocked["id"]})
+
+        first = (await browser.get("/admin/users", params={"q": "Directory", "limit": 1})).json()
+        assert first["total"] == 2 and first["has_more"]
+        assert first["items"] == first["users"]
+        assert first["items"][0]["id"] == survivor["id"]
+        assert first["items"][0]["is_admin"]
+        assert set(first["items"][0]["merged_user_ids"]) == {ancestor["id"], intermediate["id"]}
+        second = (await browser.get("/admin/users", params={"q": "Directory", "limit": 1, "start": 1})).json()
+        assert second["items"][0]["id"] == blocked["id"]
+        assert second["total"] == 2 and not second["has_more"]
+
+        searched = (await browser.get("/admin/users", params={"q": survivor["id"]})).json()
+        assert set(searched["items"][0]["merged_user_ids"]) == {ancestor["id"], intermediate["id"]}
+        assert (await browser.get("/admin/users", params={"q": ancestor["id"]})).json()["total"] == 0
+        owners = (await browser.get("/admin/users", params={"q": "Directory", "eligible_owner": True})).json()
+        assert [row["id"] for row in owners["items"]] == [survivor["id"]]
+        mergeable = (await browser.get("/admin/users", params={"q": "Directory", "eligible_merge": True})).json()
+        assert {row["id"] for row in mergeable["items"]} == {survivor["id"], blocked["id"]}

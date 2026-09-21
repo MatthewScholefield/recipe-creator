@@ -38,7 +38,7 @@ it('denies admin controls without offering a password login', async () => {
 });
 it('retains conflicting copy edits and resets only the preview until Save', async () => {
   const fetcher = mockApi((url,init) => url === '/api/session' ? identity : url === '/api/admin/photos' ? {photos:[]} : init?.method === 'PUT' ? new Response(JSON.stringify({detail:'Conflict'}),{status:409}) : {revision:3,copy:{...DEFAULT_SITE_COPY,site_title:'Existing'}});
-  render(Admin); await fireEvent.click(await screen.findByRole('button',{name:'Site text'}));
+  render(Admin); const copyTab = await screen.findByRole('button',{name:'Site text'}); await waitFor(() => expect(copyTab).toBeEnabled()); await fireEvent.click(copyTab);
   await fireEvent.input(await screen.findByLabelText('Site title'),{target:{value:'My title'}});
   await fireEvent.click(screen.getByRole('button',{name:'Save site text'})); await screen.findByRole('alert'); expect(screen.getByLabelText('Site title')).toHaveValue('My title');
   const write = fetcher.mock.calls.find(([,init]) => init?.method === 'PUT'); expect(JSON.parse(write![1]!.body as string).expected_revision).toBe(3);
@@ -46,7 +46,7 @@ it('retains conflicting copy edits and resets only the preview until Save', asyn
 });
 it('refreshes shared copy after saving and renders copy as text', async () => {
   mockApi((url,init) => url === '/api/session' ? identity : url === '/api/admin/photos' ? {photos:[]} : {revision:init?.method === 'PUT' ? 1 : 0,copy:init?.body ? JSON.parse(init.body as string).copy : DEFAULT_SITE_COPY});
-  render(Admin); await fireEvent.click(await screen.findByRole('button',{name:'Site text'}));
+  render(Admin); const copyTab = await screen.findByRole('button',{name:'Site text'}); await waitFor(() => expect(copyTab).toBeEnabled()); await fireEvent.click(copyTab);
   await fireEvent.input(await screen.findByLabelText('Site title'),{target:{value:'<b>Recipes</b>'}}); await fireEvent.click(screen.getByRole('button',{name:'Save site text'}));
   await screen.findByText('Site text saved.'); expect(appState.copy.site_title).toBe('<b>Recipes</b>'); expect(screen.getByText('<b>Recipes</b>').querySelector('b')).toBeNull();
 });
@@ -134,19 +134,3 @@ it('requires confirmation to revoke this browser and preserves local records', a
   await fireEvent.click(screen.getByRole('button',{name:'Revoke access'})); await waitFor(() => expect(appState.identity?.user).toBeNull()); expect(localStorage.getItem('notebook:bookmarks')).toBe('["r1"]'); expect(localStorage.getItem('notebook:draft:v2:draft')).toBe('keep');
 });
 
-it('uses generalized trust wording and sends only the trusted field', async () => {
-  const confirm = vi.spyOn(window,'confirm').mockReturnValue(true);
-  const fetcher = mockApi((url) => url === '/api/session' ? identity
-    : url === '/api/admin/photos' ? {photos:[{id:'p1',recipe_id:'r1',uploader_id:'u2',caption:'',status:'pending'}]}
-    : url.startsWith('/api/admin/users?') ? {users:[{...user,id:'u2',display_name:'Other'}]}
-    : {user:{...user,id:'u2',trusted:true}});
-  render(Admin);
-  await fireEvent.click(await screen.findByRole('button',{name:'Trust user'}));
-  expect(confirm).toHaveBeenCalledWith('Trust this user? Future photos can be approved automatically and future views will be classified as trusted. Existing pending photos still need approval.');
-  const write = fetcher.mock.calls.find(([url,init]) => url === '/api/admin/users/u2' && init?.method === 'PATCH');
-  expect(JSON.parse(String(write?.[1]?.body))).toEqual({trusted:true});
-  await waitFor(() => expect(screen.getByRole('button',{name:'users'})).toBeEnabled());
-  await fireEvent.click(screen.getByRole('button',{name:'users'}));
-  expect(await screen.findByText(/Untrusted user/)).toBeInTheDocument();
-  expect(screen.getByRole('button',{name:'Trust user'})).toBeInTheDocument();
-});

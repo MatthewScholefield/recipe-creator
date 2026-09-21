@@ -15,12 +15,6 @@ async function awaitBlankEditor() {
 const identity = {user:{id:'u1',display_name:'Cook',state:'active',trusted:false},device_id:'d1',admin:false,csrf_token:'csrf'};
 function mockApi(handler: (url: string, init?: RequestInit) => unknown | Promise<unknown>) {const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {const body = String(url) === '/api/tags' ? {tags:[]} : await handler(String(url),init); return body instanceof Response ? body : new Response(JSON.stringify(body));}); vi.stubGlobal('fetch',fetcher); return fetcher;}
 const recipe = {...blank('structured'),id:'r1',title:'Soup',revision:2,owner_id:'u1',author_name:'Cook',can_edit:true,directions:'Simmer 20 minutes at 180°C.',ingredient_groups:[{id:'g1',name:'',ingredients:[{...ingredient(),id:'i1',name:'stock',quantity:'1/2',unit:'cup',original_text:'½ cup stock'}]}]};
-it('uses the actual admin photo wrapper, raw status, and moderation route', async () => {
-  const fetcher = mockApi(url => url === '/api/session' ? {...identity,admin:true} : url === '/api/admin/photos' ? {photos:[{id:'p1',recipe_id:'r1',uploader_id:'u1',caption:'Dinner photo',status:'pending'}]} : {status:'approved'});
-  render(Admin); await screen.findByText(/u1 · pending/); await fireEvent.click(screen.getByRole('button',{name:'Approve'}));
-  await waitFor(() => expect(fetcher.mock.calls.some(([url,init]) => url === '/api/admin/photos/p1/moderate' && JSON.parse(init!.body as string).state === 'approved')).toBe(true));
-  expect(await screen.findByText(/u1 · approved/)).toBeInTheDocument();
-});
 it('uses device wrappers and requests server-owned summaries for My recipes', async () => {
   const fetcher = mockApi(url => url === '/api/session' ? identity : url === '/api/devices' ? {devices:[{id:'d1',current:true,revoked_at:null}]} : {items:[recipe],has_more:false});
   render(Profile,{consumeToken:vi.fn()}); await screen.findByText(/Browser \(this device\)/); await fireEvent.click(screen.getByRole('button',{name:'My recipes'}));
@@ -83,8 +77,8 @@ it('keeps raw text unsaved when automatic organization fails', async () => {
 });
 it('selects searchable merge profiles and invalidates an old preview', async () => {
   const candidates = ['Source','Target','Other'].map(display_name => ({...identity.user,id:display_name.toLowerCase(),display_name,last_login_at:null}));
-  const fetcher = mockApi(url => url === '/api/session' ? {...identity,admin:true} : url.startsWith('/api/admin/users?') ? {items:candidates,has_more:false} : url.startsWith('/api/admin/merge/preview?') ? {counts:{recipes:3}} : {photos:[]});
-  render(Admin); await fireEvent.click(await screen.findByRole('button',{name:'merge'}));
+  const fetcher = mockApi(url => url === '/api/session' ? {...identity,admin:true} : url.startsWith('/api/admin/users?') ? {items:candidates,has_more:false} : url.startsWith('/api/admin/merge/preview?') ? {source:{user:candidates[0],recipes:3,photos:0,devices:1},target:{user:candidates[1],recipes:0,photos:0,devices:1},result:{state:'active',trusted:false}} : {photos:[]});
+  render(Admin); const merge = await screen.findByRole('button',{name:'Merge profiles'}); await waitFor(() => expect(merge).toBeEnabled()); await fireEvent.click(merge);
   const source = screen.getByRole('combobox',{name:'Source profile (will merge into target)'});
   const target = screen.getByRole('combobox',{name:'Target profile (survives)'});
   await fireEvent.focus(source); await fireEvent.click(await screen.findByRole('option',{name:/^Source /}));

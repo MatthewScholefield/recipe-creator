@@ -40,6 +40,8 @@ just admin-grant --user-id <user-id> --yes
 
 `admin-users` lists active, unmerged profiles without credentials. Omit `--user-id` from `admin-grant` to select a profile interactively; noninteractive use requires both `--user-id` and `--yes`. To revoke permission, run `just admin-revoke --user-id <user-id>` and confirm the requested user ID. Keep `.env` private and never commit it.
 
+Existing admins can grant access from **Admin → Profiles → Make admin** after reviewing the confirmation. Only active, unmerged profiles can be promoted; the change applies to all connected devices and is recorded in the audit log. Merged profiles are omitted from the directory, with their IDs available under the surviving profile’s expandable **Profile IDs** details.
+
 `just help` lists build, import, backup, and restore commands. Maintenance recipes accept CLI arguments directly, for example `just import snapshot.json --dry-run`. A real import uses the configured AI provider to organize every new recipe. Successfully organized recipes are written even when others fail, and the final report lists every failed recipe by ID and title. Reimporting the same snapshot skips unchanged recipes, so only previous failures are organized again. Import canonicalizes legacy tags to lowercase kebab-case, collapses punctuation to one dash, drops edge dashes, and removes empty or duplicate results while retaining the untouched source snapshot in import history. Production uses static frontend assets, FastAPI, and SurrealDB; configure HTTPS, secure cookies, allowed origins, and persistent storage in `.env` before deployment. Keep `.env` private and never commit it.
 
 ## Production deployment

@@ -639,6 +639,13 @@ export interface components {
             merged_into?: string | null;
             /** Last Login At */
             last_login_at?: string | null;
+            /**
+             * Is Admin
+             * @default false
+             */
+            is_admin: boolean;
+            /** Merged User Ids */
+            merged_user_ids?: string[];
         };
         /** AdminUsersResponse */
         AdminUsersResponse: {
@@ -1216,6 +1223,8 @@ export interface components {
             trusted?: boolean | null;
             /** State */
             state?: ("active" | "blocked") | null;
+            /** Is Admin */
+            is_admin?: true | null;
         };
         /** ValidationError */
         ValidationError: {
